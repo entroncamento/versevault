@@ -3,7 +3,6 @@ import QuizLobby from "./quiz/QuizLobby";
 import QuizGame from "./quiz/QuizGame";
 import QuizResults from "./quiz/QuizResults";
 import { musicApi } from "../services/musicApi";
-// 1. Importar o Auth e a API de Leaderboard
 import { useAuth } from "../contexts/AuthContext";
 import { leaderboardApi } from "../services/leaderboardApi";
 
@@ -16,7 +15,7 @@ const APP_STATE = {
 };
 
 const QuizApp = () => {
-  const { currentUser } = useAuth(); // Pegar o utilizador atual
+  const { currentUser } = useAuth();
   const [gameState, setGameState] = useState(APP_STATE.LOBBY);
   const [gameMode, setGameMode] = useState(null);
   const [tracks, setTracks] = useState([]);
@@ -63,7 +62,6 @@ const QuizApp = () => {
     setFinalScore(score);
     setGameState(APP_STATE.RESULTS);
 
-    // 2. Salvar os pontos no Firebase se o user estiver logado
     if (currentUser && score > 0) {
       await leaderboardApi.addScore(currentUser, score);
     }

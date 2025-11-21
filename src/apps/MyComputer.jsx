@@ -1,3 +1,3 @@
 import React from "react";
-const MyComputer = () => <div>My Computer Content</div>;
+const MyComputer = () => <div>Carlos Teixeira</div>;
 export default MyComputer;

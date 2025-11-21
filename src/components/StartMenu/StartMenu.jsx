@@ -2,25 +2,33 @@ import React, { useEffect, useRef } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { useWindowManager } from "../../contexts/WindowManagerContext";
 
-// Componente para itens da Esquerda (Branco)
+// --- ITEM DA ESQUERDA (Fundo Branco) ---
 const LeftMenuItem = ({ icon, title, subtitle, isBold = false, onClick }) => (
   <div
-    className="group flex items-center px-2 py-1 hover:bg-xp-start-highlight hover:text-white cursor-default mb-1"
+    className="group flex items-center px-2 py-1 hover:bg-xp-start-hover hover:text-white cursor-default mb-1 mx-1 rounded-[3px]"
     onClick={onClick}
   >
-    <div className="w-8 h-8 mr-2 flex items-center justify-center">
+    <div className="w-8 h-8 mr-2 flex items-center justify-center flex-shrink-0">
       {typeof icon === "string" ? (
-        <img src={icon} alt="" className="w-full h-full object-contain" />
+        <img
+          src={icon}
+          alt=""
+          className="w-full h-full object-contain drop-shadow-sm"
+        />
       ) : (
         <div className="w-full h-full bg-gray-400 rounded-sm" />
       )}
     </div>
-    <div className="flex flex-col">
-      <span className={`text-xs ${isBold ? "font-bold" : "font-normal"}`}>
+    <div className="flex flex-col overflow-hidden">
+      <span
+        className={`text-xs truncate ${
+          isBold ? "font-bold text-gray-800" : "font-normal text-gray-700"
+        } group-hover:text-white`}
+      >
         {title}
       </span>
       {subtitle && (
-        <span className="text-[10px] text-gray-500 group-hover:text-gray-200">
+        <span className="text-[10px] text-gray-500 group-hover:text-gray-200 truncate">
           {subtitle}
         </span>
       )}
@@ -28,23 +36,21 @@ const LeftMenuItem = ({ icon, title, subtitle, isBold = false, onClick }) => (
   </div>
 );
 
-// Componente para itens da Direita (Azul Claro)
+// --- ITEM DA DIREITA (Fundo Azul) ---
 const RightMenuItem = ({ icon, title, isBold = false, onClick }) => (
   <div
-    className="group flex items-center px-2 py-1 hover:bg-xp-start-highlight hover:text-white cursor-default mb-1"
+    className="group flex items-center px-3 py-1 hover:bg-xp-start-hover hover:text-white cursor-default mb-1"
     onClick={onClick}
   >
-    <div className="w-6 h-6 mr-2 flex items-center justify-center">
+    <div className="w-6 h-6 mr-3 flex items-center justify-center flex-shrink-0">
       {typeof icon === "string" && icon !== "" ? (
         <img src={icon} alt="" className="w-full h-full object-contain" />
       ) : (
-        <div className="w-4 h-4 bg-blue-800/20 rounded-sm flex items-center justify-center text-blue-900 text-[9px] font-bold">
-          ?
-        </div>
+        <div className="w-full h-full bg-blue-200 border border-blue-400 rounded-sm" />
       )}
     </div>
     <span
-      className={`text-xs text-gray-800 group-hover:text-white ${
+      className={`text-xs text-[#00138c] group-hover:text-white leading-none ${
         isBold ? "font-bold" : ""
       }`}
     >
@@ -64,6 +70,7 @@ const StartMenu = ({ onClose }) => {
     "Administrator";
   const userPhoto = currentUser?.photoURL || "/icons/Minesweeper.ico";
 
+  // Fechar ao clicar fora
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (menuRef.current && !menuRef.current.contains(event.target)) {
@@ -71,42 +78,35 @@ const StartMenu = ({ onClose }) => {
         onClose();
       }
     };
-
     document.addEventListener("mousedown", handleClickOutside);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [onClose]);
 
   const handleEditProfile = () => {
     console.log("Abrir página de editar perfil");
+    onClose();
   };
 
-  // Funções para abrir as Apps
-  const openQuiz = () => {
-    openWindow("QUIZ");
-    onClose();
-  };
-  const openLeaderboard = () => {
-    openWindow("LEADERBOARD");
-    onClose();
-  };
-  const openComputer = () => {
-    openWindow("MY_COMPUTER");
+  // Funções auxiliares para abrir Apps
+  const handleOpenApp = (appKey) => {
+    openWindow(appKey);
     onClose();
   };
 
   return (
     <div
       ref={menuRef}
-      className="absolute bottom-[30px] left-0 z-[2000] font-sans select-none"
+      className="absolute bottom-[30px] left-0 z-[9999] font-sans select-none animate-in fade-in slide-in-from-bottom-2 duration-150"
     >
-      <div className="w-[380px] rounded-t-lg overflow-hidden shadow-xp-start-menu border-2 border-xp-start-border bg-white flex flex-col">
+      {/* Container Principal com Cores do Config */}
+      <div className="w-[380px] h-[420px] rounded-t-lg bg-xp-start-border p-[2px] pr-[3px] pb-0 shadow-xp-start flex flex-col">
         {/* --- HEADER --- */}
-        <div className="h-14 bg-gradient-to-b from-xp-start-header-start to-xp-start-header-end flex items-center px-2 border-b-2 border-orange-400 shadow-md relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-full h-[2px] bg-white/30" />
+        <div className="h-16 bg-xp-header-gradient rounded-t-[5px] relative flex items-center px-2 shadow-[inset_0px_1px_2px_rgba(255,255,255,0.5)] overflow-hidden">
+          {/* Linha de brilho no topo */}
+          <div className="absolute top-0 left-0 w-full h-[1px] bg-white/40" />
 
-          <div className="w-10 h-10 bg-white rounded border-2 border-white/60 shadow-sm overflow-hidden mr-3 flex-shrink-0">
+          {/* Foto do User */}
+          <div className="w-12 h-12 bg-xp-start-bodyRight rounded-[3px] border-[2px] border-white shadow-sm ml-1 mr-3 overflow-hidden flex-shrink-0">
             <img
               src={userPhoto}
               className="w-full h-full object-cover"
@@ -114,76 +114,84 @@ const StartMenu = ({ onClose }) => {
             />
           </div>
 
+          {/* Nome do User */}
           <span
-            className="text-white font-bold text-lg drop-shadow-md truncate"
-            style={{ textShadow: "1px 1px 2px rgba(0,0,0,0.5)" }}
+            className="text-white font-bold text-[15px] truncate tracking-wide"
+            style={{ textShadow: "1px 1px 2px rgba(0,0,0,0.6)" }}
           >
             {displayName}
           </span>
+
+          {/* Faixa Laranja */}
+          <div className="absolute bottom-0 left-0 w-full h-[2px] bg-xp-start-orange shadow-[0_-1px_0_rgba(0,0,0,0.1)]" />
         </div>
 
-        {/* --- BODY (Colunas) --- */}
-        <div className="flex h-[380px]">
-          {/* ESQUERDA (Apps na ordem do Desktop) */}
-          <div className="flex-1 bg-white flex flex-col py-2 pl-1 pr-1">
-            {/* 1. My Computer */}
+        {/* --- CORPO --- */}
+        <div className="flex flex-1 bg-white">
+          {/* ESQUERDA (Seus itens originais) */}
+          <div className="flex-[5] bg-xp-start-bodyLeft flex flex-col py-2 border-r border-xp-start-bodyRight">
             <LeftMenuItem
               title="My Computer"
               isBold
               icon="/icons/MyComputer.ico"
-              onClick={openComputer}
+              onClick={() => handleOpenApp("MY_COMPUTER")}
             />
 
-            {/* 2. VerseVault Quiz */}
             <LeftMenuItem
               title="VerseVault Quiz"
               isBold
               icon="/icons/Minesweeper.ico"
-              onClick={openQuiz}
+              onClick={() => handleOpenApp("QUIZ")}
             />
 
-            {/* 3. Leaderboard */}
             <LeftMenuItem
               title="Leaderboard"
               isBold
               icon="/icons/notepad.png"
-              onClick={openLeaderboard}
+              onClick={() => handleOpenApp("LEADERBOARD")}
             />
 
             <div className="flex-grow" />
           </div>
 
-          {/* DIREITA (Sistema / User - LIMPO) */}
-          <div className="flex-1 bg-xp-start-right-bg border-l border-xp-start-right-border py-2 pl-1 pr-1">
-            {/* Apenas Edit Profile */}
+          {/* DIREITA (Seus itens originais) */}
+          <div className="flex-[4] bg-xp-start-bodyRight py-2 px-1">
             <RightMenuItem
               title="Edit Profile"
               isBold
               icon="/icons/notepad.png"
-              onClick={handleEditProfile}
+              onClick={() => handleOpenApp("USER_ACCOUNTS")}
             />
 
+            {/* Espaço vazio para manter o layout consistente se quiseres adicionar mais tarde */}
             <div className="flex-grow" />
           </div>
         </div>
 
         {/* --- FOOTER --- */}
-        <div className="h-10 bg-gradient-to-b from-xp-start-footer-start to-xp-start-footer-end flex items-center justify-end px-3 border-t border-xp-start-border">
+        <div className="h-10 bg-xp-start-footer flex items-center justify-end px-3 pt-[1px] border-t border-white/30 shadow-[inset_0_2px_2px_rgba(0,0,0,0.1)]">
           <button
             onClick={logout}
-            className="flex items-center px-2 py-1 hover:bg-xp-start-orange-hover hover:shadow-inner text-white text-xs mr-2 rounded-sm transition-colors"
+            className="flex items-center px-2 py-1 mr-2 hover:bg-xp-start-hover hover:shadow-inner rounded-[3px] transition-all group"
           >
-            <span className="bg-[#E59700] p-0.5 border border-white/40 mr-1 rounded-[2px]">
-              🗝️
+            <div className="bg-[#E59700] p-[2px] rounded-[2px] shadow-sm border border-white/40 mr-1.5 text-white">
+              <span className="text-[10px] leading-none">🗝️</span>
+            </div>
+            <span className="text-white text-[11px] drop-shadow-md font-normal">
+              Log Off
             </span>
-            Log Off
           </button>
 
-          <button className="flex items-center px-2 py-1 hover:bg-xp-start-orange-hover hover:shadow-inner text-white text-xs rounded-sm transition-colors">
-            <span className="bg-[#D6382D] p-0.5 border border-white/40 mr-1 rounded-[2px] text-[9px]">
-              ⏻
+          <button
+            onClick={() => window.location.reload()} // Simula restart
+            className="flex items-center px-2 py-1 hover:bg-xp-start-hover hover:shadow-inner rounded-[3px] transition-all group"
+          >
+            <div className="bg-[#D6382D] p-[2px] rounded-[2px] shadow-sm border border-white/40 mr-1.5 text-white">
+              <span className="text-[10px] leading-none">⏻</span>
+            </div>
+            <span className="text-white text-[11px] drop-shadow-md font-normal">
+              Turn Off Computer
             </span>
-            Turn Off Computer
           </button>
         </div>
       </div>

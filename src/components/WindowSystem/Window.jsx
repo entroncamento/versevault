@@ -93,7 +93,6 @@ const Window = ({
       }}
       onMouseDown={() => focusWindow(id)}
     >
-      {/* Barra de Título */}
       <div
         className="h-[30px] flex items-center justify-between px-1 select-none"
         onMouseDown={handleMouseDown}
@@ -126,10 +125,8 @@ const Window = ({
         </div>
       </div>
 
-      {/* Conteúdo */}
       <div className="flex-grow bg-white relative overflow-hidden flex flex-col">
         <div className="flex-grow overflow-auto p-0">
-          {/* MUDANÇA: Passamos windowId para a App saber fechar-se a si mesma */}
           <ContentComponent windowId={id} {...props} />
         </div>
       </div>

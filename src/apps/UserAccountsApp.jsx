@@ -20,7 +20,7 @@ const XP_ICONS = [
 
 const UserAccountsApp = ({ windowId }) => {
   const { currentUser } = useAuth();
-  const { closeWindow } = useWindowManager(); // Para fechar a janela ao cancelar/salvar
+  const { closeWindow } = useWindowManager();
 
   const [name, setName] = useState(currentUser?.displayName || "");
   const [photoUrl, setPhotoUrl] = useState(
@@ -39,7 +39,7 @@ const UserAccountsApp = ({ windowId }) => {
         displayName: name,
         photoURL: photoUrl,
       });
-      // Fechar a janela após sucesso
+
       closeWindow(windowId);
     } catch (error) {
       console.error("Erro ao atualizar perfil:", error);
@@ -55,7 +55,6 @@ const UserAccountsApp = ({ windowId }) => {
 
   return (
     <div className="h-full w-full bg-white font-sans flex flex-col overflow-hidden relative">
-      {/* --- MODAL DE ÍCONES --- */}
       {showIconPicker && (
         <div
           className="absolute inset-0 z-50 flex items-center justify-center bg-black/20"
@@ -107,7 +106,6 @@ const UserAccountsApp = ({ windowId }) => {
         </div>
       )}
 
-      {/* --- TOPO: Barra de Navegação XP --- */}
       <div className="h-[50px] bg-[#003399] flex items-center px-4 justify-between relative overflow-hidden border-b-[2px] border-orange-400 flex-shrink-0">
         <div className="absolute top-0 left-0 w-full h-1/2 bg-white/10 pointer-events-none" />
         <div className="flex items-center gap-4 z-10">

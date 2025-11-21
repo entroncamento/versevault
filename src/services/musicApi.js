@@ -1,24 +1,15 @@
-// --- CONFIGURAÇÃO DAS CHAVES ---
-// ⚠️ IMPORTANTE: Substitui estas strings pelas tuas chaves reais!
-const LASTFM_API_KEY = "4d35ccc1f80b0849a7fa7e946707ebb3";
+// --- CONFIGURAÇÃO ---
 const GENIUS_ACCESS_TOKEN =
   "fnsqEBYA2b0n3Uin4bmjMPk1QHWXpACh5eACwi6XTnrxHpXV0KPEAvb5wphf8D_J";
 
-// URLs BASE
-const ITUNES_BASE = "https://itunes.apple.com";
-const LASTFM_BASE = "https://ws.audioscrobbler.com/2.0";
+// Aponta para o teu servidor proxy local (certifica-te que o node server.js está a correr)
+const PROXY_BASE = "http://localhost:3001";
 const WIKIPEDIA_BASE = "https://en.wikipedia.org/api/rest_v1/page/summary";
-
-// Proxy APENAS para Genius (iTunes não precisa)
 const CORS_PROXY = "https://cors-anywhere.herokuapp.com/";
 
-// --- DETEÇÃO DE CIRÍLICO (Anti-Russo) ---
-const hasCyrillic = (text) => /[\u0400-\u04FF]/.test(text);
-
-// --- FILTRO DE LIMPEZA (NOVO: Anti-Remix) ---
-const isCleanTrack = (title) => {
-  const lower = title.toLowerCase();
-  const bannedTerms = [
+// --- UTILS ---
+const isCleanTrack = (title) =>
+  ![
     "remix",
     "mix",
     "live",
@@ -30,271 +21,133 @@ const isCleanTrack = (title) => {
     "session",
     "edit",
     "version",
-  ];
-  // Retorna true se NÃO tiver nenhum termo banido
-  return !bannedTerms.some((term) => lower.includes(term));
+  ].some((t) => title.toLowerCase().includes(t));
+
+// Permite colaborações (feat, &, etc)
+const isCollab = (artistName) => {
+  const lower = artistName.toLowerCase();
+  return (
+    lower.includes("feat") ||
+    lower.includes("ft.") ||
+    lower.includes("&") ||
+    lower.includes(",") ||
+    lower.includes(" x ") ||
+    lower.includes(" with ")
+  );
 };
 
-// --- ALGORITMO DE LEVENSHTEIN ---
-const getLevenshteinDistance = (a, b) => {
-  const matrix = [];
-  for (let i = 0; i <= b.length; i++) matrix[i] = [i];
-  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
-  for (let i = 1; i <= b.length; i++) {
-    for (let j = 1; j <= a.length; j++) {
-      if (b.charAt(i - 1) === a.charAt(j - 1)) {
-        matrix[i][j] = matrix[i - 1][j - 1];
-      } else {
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j - 1] + 1,
-          Math.min(matrix[i][j - 1] + 1, matrix[i - 1][j] + 1)
-        );
-      }
-    }
-  }
-  return matrix[b.length][a.length];
+const normalizeStr = (s) =>
+  s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+const isSameName = (str1, str2) => normalizeStr(str1) === normalizeStr(str2);
+
+// Filtro de Acentos (O "Anti-Jüse")
+const hasUnwantedAccents = (artistName, query) => {
+  const q = query.toLowerCase();
+  const a = artistName.toLowerCase();
+  const queryHasAccents = q.normalize("NFD").match(/[\u0300-\u036f]/);
+  const artistHasAccents = a.normalize("NFD").match(/[\u0300-\u036f]/);
+  // Se a query for "pura" (sem acentos) mas o artista tiver acentos -> LIXO
+  return !queryHasAccents && artistHasAccents;
 };
 
-// --- VALIDAÇÃO DE STRINGS ---
-const isStringMatch = (str1, str2) => {
-  const normalize = (s) => s.toLowerCase().trim();
-  const clean = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
-
-  const a = normalize(str1);
-  const b = normalize(str2);
-
-  if (a === b) return true;
-
-  const cleanA = clean(str1);
-  const cleanB = clean(str2);
-
-  // Inclusão (Para apanhar colaborações)
-  if (cleanA.includes(cleanB) || cleanB.includes(cleanA)) {
-    const minLen = Math.min(cleanA.length, cleanB.length);
-    if (minLen >= 4) return true;
-    if (Math.abs(cleanA.length - cleanB.length) > 4) return false;
-    return true;
-  }
-
-  // Levenshtein
-  const dist = getLevenshteinDistance(cleanA, cleanB);
-  const maxLen = Math.max(cleanA.length, cleanB.length);
-  if (maxLen < 5) return dist <= 0;
-  if (maxLen < 8) return dist <= 1;
-  return dist <= 2;
-};
-
-// --- 1. SERVIÇO ITUNES (ROBUSTO & SIMPLIFICADO) ---
+// --- SERVIÇOS ---
 const iTunesService = {
-  normalize(track) {
-    return {
-      id: `itunes-${track.trackId}`,
-      title: track.trackName,
-      artist: track.artistName,
-      cover: track.artworkUrl100.replace("100x100", "500x500"),
-      previewUrl: track.previewUrl,
-      album: track.collectionName,
-      year: new Date(track.releaseDate).getFullYear(),
-      source: "iTunes",
-      fact: null,
-      geniusUrl: null,
-    };
-  },
-
-  // Tenta encontrar uma música específica
-  async searchTrack(targetArtist, targetTrackName) {
+  normalize: (t) => ({
+    id: `itunes-${t.trackId}`,
+    title: t.trackName,
+    artist: t.artistName,
+    artistId: String(t.artistId),
+    cover: t.artworkUrl100.replace("100x100", "500x500"),
+    previewUrl: t.previewUrl,
+    album: t.collectionName,
+    year: new Date(t.releaseDate).getFullYear(),
+    source: "iTunes",
+  }),
+  async search(term, limit = 50) {
     try {
-      const cleanTrackName = targetTrackName.split(/[\(\-\[]/)[0].trim();
-      // Pesquisa combinada
-      let term = encodeURIComponent(`${targetArtist} ${cleanTrackName}`);
-      let res = await fetch(
-        `${ITUNES_BASE}/search?term=${term}&entity=song&limit=5`
-      );
-      let data = await res.json();
-
-      let foundTrack = this.findBestMatch(
-        data.results,
-        targetArtist,
-        targetTrackName
-      );
-
-      if (!foundTrack) {
-        // Tenta só pelo nome da música
-        term = encodeURIComponent(cleanTrackName);
-        res = await fetch(
-          `${ITUNES_BASE}/search?term=${term}&entity=song&limit=10`
-        );
-        data = await res.json();
-        foundTrack = this.findBestMatch(
-          data.results,
-          targetArtist,
-          targetTrackName
-        );
-      }
-
-      if (foundTrack) return this.normalize(foundTrack);
-      return null;
-    } catch (e) {
-      return null;
-    }
-  },
-
-  // Valida se o resultado do iTunes é bom
-  findBestMatch(results, targetArtist, targetTrackName) {
-    if (!results || results.length === 0) return null;
-
-    return results.find((track) => {
-      if (!track.previewUrl) return false;
-      // NOVO: Filtra Remixes
-      if (!isCleanTrack(track.trackName)) return false;
-
-      // Filtro Anti-Russo
-      if (
-        !hasCyrillic(targetArtist) &&
-        (hasCyrillic(track.artistName) || hasCyrillic(track.trackName))
-      )
-        return false;
-
-      const artistMatch = isStringMatch(track.artistName, targetArtist);
-      // Validação de título mais relaxada
-      const cleanTitle = targetTrackName.split(/[\(\-\[]/)[0].trim();
-      const titleMatch = isStringMatch(track.trackName, cleanTitle);
-
-      return artistMatch && titleMatch;
-    });
-  },
-
-  // PESQUISA DE RESGATE: Busca TUDO do artista
-  async getArtistTopTracks(artistName) {
-    try {
-      // Pesquisa apenas pelo nome do artista
-      const term = encodeURIComponent(artistName);
-      // attribute=artistTerm força a pesquisa a ser sobre o artista, não o nome da música
+      // Pede logo 50 músicas de uma vez via Proxy
       const res = await fetch(
-        `${ITUNES_BASE}/search?term=${term}&entity=song&attribute=artistTerm&limit=50`
+        `${PROXY_BASE}/api/itunes?term=${encodeURIComponent(
+          term
+        )}&entity=song&limit=${limit}`
       );
       const data = await res.json();
-
-      // Filtra para garantir que é mesmo o artista e tem preview
-      const validTracks = data.results.filter((track) => {
-        if (!track.previewUrl) return false;
-        if (!isCleanTrack(track.trackName)) return false; // NOVO
-        if (
-          !hasCyrillic(artistName) &&
-          (hasCyrillic(track.artistName) || hasCyrillic(track.trackName))
-        )
-          return false;
-        return isStringMatch(track.artistName, artistName);
-      });
-
-      // Remove duplicados
-      const uniqueTracks = [];
-      const seenIds = new Set();
-      for (const t of validTracks) {
-        // Normaliza título para evitar "Song" e "Song (Live)"
-        const cleanTitle = t.trackName
-          .split(/[\(\-\[]/)[0]
-          .trim()
-          .toLowerCase();
-        if (!seenIds.has(cleanTitle)) {
-          seenIds.add(cleanTitle);
-          uniqueTracks.push(this.normalize(t));
-        }
-      }
-
-      return uniqueTracks.slice(0, 15);
-    } catch (e) {
-      return [];
-    }
-  },
-
-  // Para modo género, pesquisa genérica
-  async getGenreTracks(genre) {
-    try {
-      const term = encodeURIComponent(genre);
-      const res = await fetch(
-        `${ITUNES_BASE}/search?term=${term}&entity=song&limit=50`
-      );
-      const data = await res.json();
-
       return data.results
-        .filter((t) => t.previewUrl && isCleanTrack(t.trackName))
-        .map(this.normalize)
-        .slice(0, 15);
-    } catch (e) {
+        ? data.results
+            .filter((t) => t.previewUrl && isCleanTrack(t.trackName))
+            .map(this.normalize)
+        : [];
+    } catch {
       return [];
     }
   },
 };
 
-// --- 2. SERVIÇO LAST.FM ---
-const LastFmService = {
-  async getTopTracksByArtist(artist) {
+const DeezerService = {
+  normalize: (t) => ({
+    id: `deezer-${t.id}`,
+    title: t.title,
+    artist: t.artist.name,
+    artistId: String(t.artist.id),
+    cover: t.album.cover_xl || t.album.cover_medium,
+    previewUrl: t.preview,
+    album: t.album.title,
+    year: null,
+    source: "Deezer",
+  }),
+  async search(query, isArtistMode = false) {
     try {
-      const url = `${LASTFM_BASE}/?method=artist.gettoptracks&artist=${encodeURIComponent(
-        artist
-      )}&api_key=${LASTFM_API_KEY}&format=json&limit=30`;
-      const res = await fetch(url);
-      const data = await res.json();
-      const rawTracks = data.toptracks?.track || [];
-      return rawTracks.filter((t) => isStringMatch(t.artist.name, artist));
-    } catch (e) {
-      return [];
-    }
-  },
-
-  async getTopTracksByTag(tag) {
-    try {
-      const url = `${LASTFM_BASE}/?method=tag.gettoptracks&tag=${encodeURIComponent(
-        tag
-      )}&api_key=${LASTFM_API_KEY}&format=json&limit=40`;
-      const res = await fetch(url);
-      const data = await res.json();
-      return data.tracks?.track || [];
-    } catch (e) {
-      return [];
-    }
-  },
-};
-
-// --- 3. SERVIÇO GENIUS ---
-const GeniusService = {
-  async getSnippet(trackName, artistName) {
-    if (!GENIUS_ACCESS_TOKEN || GENIUS_ACCESS_TOKEN.includes("TOKEN_DO_GENIUS"))
-      return null;
-    try {
-      const cleanTrack = trackName.split(/[\(\-\[]/)[0].trim();
-      const query = encodeURIComponent(`${cleanTrack} ${artistName}`);
+      // Se for modo artista, usamos "artist:" para filtrar logo na fonte
+      const q = isArtistMode ? `artist:"${query}"` : query;
       const res = await fetch(
-        `${CORS_PROXY}https://api.genius.com/search?q=${query}`,
-        {
-          headers: { Authorization: `Bearer ${GENIUS_ACCESS_TOKEN}` },
-        }
+        `${PROXY_BASE}/api/deezer?q=${encodeURIComponent(q)}`
       );
       const data = await res.json();
-      if (data.response.hits.length > 0) {
-        const hit = data.response.hits.find((h) =>
-          isStringMatch(h.result.primary_artist.name, artistName)
-        );
-        return hit ? hit.result.url : null;
-      }
-      return null;
-    } catch (e) {
+      return data.data
+        ? data.data
+            .filter((t) => t.preview && isCleanTrack(t.title))
+            .map(this.normalize)
+        : [];
+    } catch {
+      return [];
+    }
+  },
+};
+
+const GeniusService = {
+  async getSnippet(t, a) {
+    try {
+      const res = await fetch(
+        `${CORS_PROXY}https://api.genius.com/search?q=${encodeURIComponent(
+          t + " " + a
+        )}`,
+        { headers: { Authorization: `Bearer ${GENIUS_ACCESS_TOKEN}` } }
+      );
+      const data = await res.json();
+      return data.response.hits[0]?.result.url || null;
+    } catch {
       return null;
     }
   },
 };
 
-// --- 4. SERVIÇO WIKIPEDIA ---
 const WikipediaService = {
-  async getArtistSummary(artistName) {
+  async getArtistSummary(a) {
     try {
+      // Limpa o nome para a Wikipedia (remove "feat", "&", etc) para ter mais sucesso
+      const cleanArtist = a.split(/ feat| ft\.| &|,| x /)[0].trim();
       const res = await fetch(
-        `${WIKIPEDIA_BASE}/${encodeURIComponent(artistName.replace(/ /g, "_"))}`
+        `${WIKIPEDIA_BASE}/${encodeURIComponent(
+          cleanArtist.replace(/ /g, "_")
+        )}`
       );
       const data = await res.json();
       return data.extract ? data.extract.substring(0, 200) + "..." : null;
-    } catch (e) {
+    } catch {
       return null;
     }
   },
@@ -302,116 +155,121 @@ const WikipediaService = {
 
 // --- ORQUESTRADOR ---
 export const musicApi = {
-  generateOptions(correctTrack, allTracks) {
-    const wrong = allTracks
-      .filter((t) => t.title !== correctTrack.title)
+  generateOptions(correct, all) {
+    const others = all
+      .filter((t) => t.title !== correct.title)
       .sort(() => 0.5 - Math.random())
       .slice(0, 3);
-    return [...wrong, correctTrack].sort(() => 0.5 - Math.random());
+    return [...others, correct].sort(() => 0.5 - Math.random());
   },
-
-  generateWordOptions(correctWord) {
-    const commonWords = [
-      "Love",
-      "Night",
-      "Baby",
-      "Heart",
-      "World",
-      "Time",
-      "Life",
-      "Yeah",
-      "Feel",
-      "Dance",
-      "Fire",
-      "Soul",
-    ];
-    const wrongOptions = commonWords
-      .filter((w) => w.toLowerCase() !== correctWord.toLowerCase())
-      .sort(() => 0.5 - Math.random())
-      .slice(0, 3);
-    return [...wrongOptions, correctWord].sort(() => 0.5 - Math.random());
+  generateWordOptions(w) {
+    return [
+      ...["Love", "Night", "Baby", "Heart", "World", "Time"]
+        .filter((ow) => ow.toLowerCase() !== w.toLowerCase())
+        .sort(() => 0.5 - Math.random())
+        .slice(0, 3),
+      w,
+    ].sort(() => 0.5 - Math.random());
   },
-
-  async getLyricChallenge(artist, title) {
+  async getLyricChallenge() {
     return null;
   },
 
   async getGameData(mode, query) {
-    let finalTracks = [];
+    let tracks = [];
 
-    // --- FASE 1: TENTATIVA "PERFEITA" (LAST.FM + ITUNES MATCH) ---
-    // Tenta encontrar as músicas mais populares do Last.fm no iTunes
-    try {
-      let rawTracks = [];
-      if (mode === "ARTIST") {
-        rawTracks = await LastFmService.getTopTracksByArtist(query);
-      } else if (mode === "GENRE") {
-        const genres = ["rock", "pop", "hip-hop", "electronic", "jazz", "80s"];
-        const randomGenre = genres[Math.floor(Math.random() * genres.length)];
-        rawTracks = await LastFmService.getTopTracksByTag(
-          mode === "GENRE" ? query : randomGenre
-        );
-      } else {
-        // Random
-        const genres = ["pop", "rock", "rap"];
-        const randomGenre = genres[Math.floor(Math.random() * genres.length)];
-        rawTracks = await LastFmService.getTopTracksByTag(randomGenre);
-      }
+    console.log(`🚀 BUSCA DIRETA: "${query}" [${mode}]`);
 
-      if (rawTracks.length > 0) {
-        const tracksToEnrich = rawTracks.slice(0, 15);
-        const enrichedPromises = tracksToEnrich.map((t) =>
-          iTunesService.searchTrack(t.artist.name, t.name)
-        );
-        const results = await Promise.all(enrichedPromises);
-        finalTracks = results.filter((t) => t !== null);
+    // --- MODO 1: RANDOM (CAOS TOTAL) ---
+    if (mode === "RANDOM") {
+      // Sementes do caos para garantir variedade
+      const seeds = [
+        "love",
+        "feat",
+        "2024",
+        "trap",
+        "rock",
+        "vibe",
+        "hit",
+        "the",
+        "me",
+        "you",
+      ];
+      const seed1 = seeds[Math.floor(Math.random() * seeds.length)];
+      const seed2 = seeds[Math.floor(Math.random() * seeds.length)];
 
-        // Remove duplicados
-        finalTracks = finalTracks.filter(
-          (v, i, a) => a.findIndex((t) => t.title === v.title) === i
-        );
-      }
-    } catch (e) {
-      console.warn("Fase 1 falhou");
+      // Dispara buscas paralelas (sem filtros de artista)
+      const [itunes, deezer] = await Promise.all([
+        iTunesService.search(seed1, 50),
+        DeezerService.search(seed2),
+      ]);
+      tracks = [...itunes, ...deezer].sort(() => 0.5 - Math.random());
     }
 
-    // --- FASE 2: FALLBACK "BRUTO" (ITUNES DIRETO) ---
-    // Se a combinação falhou (ex: nomes não batem certo), pedimos ao iTunes
-    // tudo o que ele tem desse artista/género.
-    if (finalTracks.length < 4) {
-      console.log("Ativando iTunes Fallback para:", query);
-      let fallbackTracks = [];
+    // --- MODO 2: ARTISTA (CIRÚRGICO) ---
+    else {
+      // 1. Busca simultânea no iTunes e Deezer (Sem Last.fm para não atrasar)
+      // Nota: Deezer usa true para ativar o modo 'artist:"query"'
+      const [itunes, deezer] = await Promise.all([
+        iTunesService.search(query),
+        DeezerService.search(query, true),
+      ]);
+      tracks = [...itunes, ...deezer];
 
-      if (mode === "ARTIST") {
-        fallbackTracks = await iTunesService.getArtistTopTracks(query);
-      } else {
-        fallbackTracks = await iTunesService.getGenreTracks(query);
-      }
+      // 2. FILTRO DE SEGURANÇA (O "Porteiro")
+      // Elimina tudo o que não for EXATAMENTE o artista ou uma colaboração dele
+      tracks = tracks.filter((t) => {
+        // a) Nome tem de conter a pesquisa (ou ser igual)
+        const nameMatch =
+          t.artist.toLowerCase().includes(query.toLowerCase()) ||
+          isSameName(t.artist, query);
+        if (!nameMatch) return false;
 
-      // Merge inteligente (evita adicionar músicas que já lá estão)
-      const existingTitles = new Set(
-        finalTracks.map((t) => t.title.toLowerCase())
-      );
-      for (const t of fallbackTracks) {
-        if (!existingTitles.has(t.title.toLowerCase())) {
-          finalTracks.push(t);
-          existingTitles.add(t.title.toLowerCase());
+        // b) Acentos têm de bater certo (Anti-Impostor)
+        if (hasUnwantedAccents(t.artist, query)) return false;
+
+        return true;
+      });
+
+      // 3. ELEIÇÃO DE ID (Para garantir consistência)
+      // Se encontrarmos vários artistas com o mesmo nome (raro com o filtro acima), ficamos com o mais popular
+      if (tracks.length > 0) {
+        const counts = {};
+        tracks.forEach((t) => {
+          if (t.artistId) counts[t.artistId] = (counts[t.artistId] || 0) + 1;
+        });
+
+        // Encontra o ID vencedor
+        const winnerId = Object.keys(counts).sort(
+          (a, b) => counts[b] - counts[a]
+        )[0];
+
+        if (winnerId) {
+          tracks = tracks.filter(
+            (t) => String(t.artistId) === String(winnerId) || isCollab(t.artist)
+          );
         }
       }
     }
 
-    if (finalTracks.length < 4) return [];
-
-    // --- FASE 3: WIKIPEDIA ---
-    const wikiFact = await WikipediaService.getArtistSummary(
-      finalTracks[0].artist
+    // Remove duplicados exatos (mesmo título)
+    tracks = tracks.filter(
+      (v, i, a) =>
+        a.findIndex((t) => t.title.toLowerCase() === v.title.toLowerCase()) ===
+        i
     );
-    if (finalTracks[0]) finalTracks[0].fact = wikiFact;
 
-    return finalTracks.slice(0, 10);
+    // Obtém info da Wikipedia usando a query original (mais provável de existir)
+    if (tracks.length && tracks[0]) {
+      const wikiTarget = mode === "ARTIST" ? query : tracks[0].artist;
+      tracks[0].fact = await WikipediaService.getArtistSummary(wikiTarget);
+    }
+
+    console.log(`✅ Resultados finais: ${tracks.length} faixas.`);
+    return tracks.slice(0, 10);
   },
 
-  async getHint(trackName, artistName) {
-    return await GeniusService.getSnippet(trackName, artistName);
+  async getHint(t, a) {
+    return await GeniusService.getSnippet(t, a);
   },
 };

@@ -1,26 +1,31 @@
 import React, { createContext, useState, useContext, useCallback } from "react";
 import { v4 as uuidv4 } from "uuid";
 
-// Importa as Apps
 import QuizApp from "../apps/QuizApp.jsx";
 import MyComputer from "../apps/MyComputer.jsx";
-import LeaderboardApp from "../apps/LeaderboardApp.jsx"; // Importação da Leaderboard
+import LeaderboardApp from "../apps/LeaderboardApp.jsx";
+import UserAccountsApp from "../apps/UserAccountsApp.jsx";
 
 const appRegistry = {
   QUIZ: {
     component: QuizApp,
     title: "VerseVault Quiz",
-    icon: "/icons/notepad.png",
+    icon: "/icons/Minesweeper.ico",
   },
   MY_COMPUTER: {
     component: MyComputer,
     title: "My Computer",
-    icon: "/icons/computer.png",
+    icon: "/icons/MyComputer.ico",
   },
   LEADERBOARD: {
     component: LeaderboardApp,
     title: "Leaderboard",
-    icon: "/icons/notepad.png", // Podes mudar para um ícone de troféu se tiveres
+    icon: "/icons/notepad.png",
+  },
+  USER_ACCOUNTS: {
+    component: UserAccountsApp,
+    title: "User Accounts",
+    icon: "/icons/user.png",
   },
 };
 
@@ -51,7 +56,7 @@ export const WindowManagerProvider = ({ children }) => {
           x: 50 + Math.random() * 50,
           y: 50 + Math.random() * 50,
         },
-        // Tamanhos personalizados por App
+
         size:
           appKey === "LEADERBOARD"
             ? { width: 600, height: 500 }

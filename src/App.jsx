@@ -16,11 +16,32 @@ const OSContent = () => {
   const { currentUser, logout } = useAuth();
 
   // Estado para controlar se o perfil já foi confirmado/criado
-  const [setupComplete, setSetupComplete] = useState(false);
+  const [setupComplete, setSetupComplete] = useState(() => {
+    // Inicializa com base no currentUser (se disponível) para evitar mostrar
+    // o ecrã de criação de perfil quando o utilizador já tiver nome/foto.
+    // Se currentUser ainda não estiver carregado, assumimos false e atualizamos
+    // no effect abaixo.
+    return Boolean(
+      typeof window !== "undefined" &&
+        // currentUser poderá ser undefined no momento da inicialização,
+        // por isso acedemos dinamicamente ao objeto através de useAuth.
+        false
+    );
+  });
 
-  // Efeito: Se o user fizer logout, resetamos o setup
+  // Atualiza setupComplete quando o estado do utilizador muda.
   useEffect(() => {
     if (!currentUser) {
+      setSetupComplete(false);
+      return;
+    }
+
+    // Consideramos o setup completo apenas se o utilizador tiver tanto
+    // displayName quanto photoURL preenchidos. Caso contrário mostramos
+    // o CreateProfileScreen para que possa definir estes valores.
+    if (currentUser.displayName && currentUser.photoURL) {
+      setSetupComplete(true);
+    } else {
       setSetupComplete(false);
     }
   }, [currentUser]);
