@@ -10,7 +10,7 @@ import {
   increment,
   serverTimestamp,
 } from "firebase/firestore";
-import { app } from "../firebase"; // Certifica-te que exportaste 'app' do teu firebase.js
+import { app } from "../firebase";
 
 const db = getFirestore(app);
 
@@ -22,30 +22,46 @@ export const leaderboardApi = {
     const userRef = doc(db, "leaderboard", user.uid);
 
     try {
-      // setDoc com { merge: true } cria o documento se não existir
-      // ou atualiza se já existir.
+      console.log(
+        `📝 A tentar salvar ${points} pontos para ${user.displayName}...`
+      );
+
       await setDoc(
         userRef,
         {
           username: user.displayName || user.email.split("@")[0],
           photoURL: user.photoURL || "/icons/Minesweeper.ico",
-          totalScore: increment(points), // A magia acontece aqui: soma ao valor anterior
+          totalScore: increment(points),
           lastPlayed: serverTimestamp(),
         },
         { merge: true }
       );
 
-      console.log("Pontos salvos com sucesso!");
+      console.log("✅ Pontos salvos com sucesso!");
+      return true; // Sucesso
     } catch (error) {
-      console.error("Erro ao salvar pontos:", error);
+      console.error("❌ Erro Crítico ao salvar pontos:", error);
+
+      // Deteta se foi bloqueado por AdBlocker
+      if (
+        (error.message && error.message.includes("offline")) ||
+        error.code === "unavailable"
+      ) {
+        alert(
+          "⚠️ Erro: O teu AdBlocker impediu o jogo de salvar a pontuação.\n\nPor favor desativa o AdBlocker no localhost e tenta de novo."
+        );
+      } else {
+        alert("Failed to save score. Check console for details.");
+      }
+      return false; // Falha
     }
   },
 
   // Buscar o Top 10
   async getTopPlayers() {
-    // Implementação otimizada: stale-while-revalidate usando localStorage
     const CACHE_KEY = "leaderboard_cache_v1";
-    const CACHE_TTL = 1000 * 60 * 5; // 5 minutes
+    // Reduzi o tempo de cache para 1 minuto para veres os resultados mais depressa enquanto testas
+    const CACHE_TTL = 1000 * 60 * 1;
 
     const readCache = () => {
       try {
@@ -64,9 +80,7 @@ export const leaderboardApi = {
           CACHE_KEY,
           JSON.stringify({ ts: Date.now(), data })
         );
-      } catch (e) {
-        // ignore
-      }
+      } catch (e) {}
     };
 
     const fetchRemote = async () => {
@@ -88,38 +102,19 @@ export const leaderboardApi = {
         return result;
       } catch (error) {
         console.error("Erro ao buscar leaderboard:", error);
-        // If remote fetch fails, try to return existing cache as a fallback
-        try {
-          const raw = localStorage.getItem(CACHE_KEY);
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            return parsed.data || [];
-          }
-        } catch (e) {
-          // ignore
-        }
-        return [];
+        // Se falhar (ex: AdBlocker), tenta mostrar a cache antiga
+        const cache = readCache();
+        return cache ? cache.data : [];
       }
     };
 
     try {
       const cache = readCache();
-
-      if (cache) {
-        // Always return cached data immediately to avoid flash/empty state.
-        // If cache is stale, revalidate in background.
-        if (Date.now() - cache.ts >= CACHE_TTL) {
-          // Revalidate in background but don't block UI
-          fetchRemote();
-        }
+      if (cache && Date.now() - cache.ts < CACHE_TTL) {
         return cache.data;
       }
-
-      // No cache at all -> fetch remote (blocking)
-      const remote = await fetchRemote();
-      return remote;
+      return await fetchRemote();
     } catch (e) {
-      console.error("Erro no cache da leaderboard:", e);
       return await fetchRemote();
     }
   },

@@ -9,37 +9,39 @@ const QuizGame = ({ tracks, mode, onFinish }) => {
   const [selectedOption, setSelectedOption] = useState(null);
   const [isAnswered, setIsAnswered] = useState(false);
 
-  // --- LÓGICA DE DICAS PROGRESSIVAS ---
-  const [hintText, setHintText] = useState(null);
-  const [hintLevel, setHintLevel] = useState(0); // 0 = sem dicas, 1 = ano, 2 = album
-
   const audioRef = useRef(null);
   const currentTrack = tracks[currentIndex];
   const [options, setOptions] = useState([]);
 
-  // Inicialização quando a música muda
+  // Deteta se estamos em modo de Letras (verifica a prop global ou a da faixa)
+  const isLyricsMode = mode === "LYRICS" || currentTrack?.gameMode === "LYRICS";
+
   useEffect(() => {
     if (!currentTrack) return;
 
+    // Gera opções de resposta baralhadas
     setOptions(musicApi.generateOptions(currentTrack, tracks));
-
     setTimeLeft(30);
     setIsAnswered(false);
     setSelectedOption(null);
-    setIsPlaying(true);
 
-    // Reset das dicas para a nova música
-    setHintText(null);
-    setHintLevel(0);
-
-    if (audioRef.current) {
-      audioRef.current.volume = 0.5;
-      const playPromise = audioRef.current.play();
-      if (playPromise !== undefined) {
-        playPromise.catch(() => setIsPlaying(false));
-      }
+    // Lógica de Áudio: Toca apenas se NÃO for modo Lyrics e se houver previewURL
+    if (!isLyricsMode && currentTrack.previewUrl) {
+      setIsPlaying(true);
+      // Pequeno delay para garantir que o elemento HTML existe
+      setTimeout(() => {
+        if (audioRef.current) {
+          audioRef.current.volume = 0.5;
+          audioRef.current.play().catch((err) => {
+            console.warn("Autoplay bloqueado:", err);
+            setIsPlaying(false);
+          });
+        }
+      }, 100);
+    } else {
+      setIsPlaying(false);
     }
-  }, [currentIndex, currentTrack, tracks]);
+  }, [currentIndex, currentTrack, tracks, isLyricsMode]);
 
   // Timer
   useEffect(() => {
@@ -58,7 +60,7 @@ const QuizGame = ({ tracks, mode, onFinish }) => {
 
   const handleTimeOut = () => {
     setIsAnswered(true);
-    setTimeout(nextQuestion, 2000);
+    setTimeout(nextQuestion, 2500);
   };
 
   const handleAnswer = (trackId) => {
@@ -67,40 +69,11 @@ const QuizGame = ({ tracks, mode, onFinish }) => {
     setSelectedOption(trackId);
 
     if (trackId === currentTrack.id) {
+      // Cálculo de pontuação: base + bónus de tempo
       const points = 100 + timeLeft * 10;
       setScore((prev) => prev + points);
     }
     setTimeout(nextQuestion, 2000);
-  };
-
-  // --- FUNÇÃO PROGRESSIVA DE DICAS (COM PROTEÇÃO DE SALDO) ---
-  const handleGetHint = () => {
-    if (isAnswered) return;
-
-    const yearData = currentTrack.year || "????";
-    const albumData = currentTrack.album || "Unknown Album";
-
-    if (hintLevel === 0) {
-      // Verifica saldo para Dica Nível 1 (Custo 300)
-      if (score < 300) {
-        alert("Insufficient funds! You need 300 points to buy a hint.");
-        return;
-      }
-
-      setScore((prev) => prev - 300);
-      setHintText(`📅 Year: ${yearData}`);
-      setHintLevel(1);
-    } else if (hintLevel === 1) {
-      // Verifica saldo para Dica Nível 2 (Custo 600)
-      if (score < 600) {
-        alert("Insufficient funds! You need 600 points to buy a super hint.");
-        return;
-      }
-
-      setScore((prev) => prev - 600);
-      setHintText(`📅 Year: ${yearData} \n💿 Album: "${albumData}"`);
-      setHintLevel(2);
-    }
   };
 
   const nextQuestion = () => {
@@ -111,14 +84,14 @@ const QuizGame = ({ tracks, mode, onFinish }) => {
     }
   };
 
-  if (!currentTrack) return <div>Loading...</div>;
+  if (!currentTrack) return <div>A carregar...</div>;
 
   return (
     <div className="h-full flex flex-col bg-[#ECE9D8] p-2 select-none">
-      {/* Info Bar */}
+      {/* Barra de Informação Superior */}
       <div className="flex justify-between items-center bg-black text-green-500 font-mono p-2 mb-2 rounded-sm border border-gray-500 shadow-inner">
         <span className="text-xs md:text-sm">
-          TRACK {currentIndex + 1}/{tracks.length}
+          FAIXA {currentIndex + 1}/{tracks.length}
         </span>
         <span
           className={`text-xl font-bold ${
@@ -127,69 +100,50 @@ const QuizGame = ({ tracks, mode, onFinish }) => {
         >
           00:{timeLeft.toString().padStart(2, "0")}
         </span>
-        <span className="text-xs md:text-sm">
-          SCORE: {score.toString().padStart(6, "0")}
-        </span>
+        <span className="text-xs md:text-sm">PONTOS: {score}</span>
       </div>
 
-      {/* Área Visual */}
-      <div className="flex-grow flex flex-col items-center justify-center bg-gray-900 border-2 border-gray-600 relative overflow-hidden mb-2 shadow-[inset_0_0_20px_rgba(0,0,0,0.8)]">
-        {currentTrack.previewUrl && (
+      {/* Área Visual Central (Vinil ou Letra) */}
+      <div className="flex-grow flex flex-col items-center justify-center bg-gray-900 border-2 border-gray-600 relative overflow-hidden mb-2 shadow-[inset_0_0_20px_rgba(0,0,0,0.8)] p-4">
+        {/* Elemento de Áudio (Invisível mas funcional) */}
+        {!isLyricsMode && currentTrack.previewUrl && (
           <audio ref={audioRef} src={currentTrack.previewUrl} />
         )}
 
-        {/* BOTÃO DE DICA DINÂMICO */}
-        {!isAnswered && hintLevel < 2 && (
-          <button
-            onClick={handleGetHint}
-            className={`absolute top-2 right-2 z-20 text-black text-xs px-2 py-1 border hover:bg-white shadow-sm active:translate-y-[1px] ${
-              hintLevel === 0
-                ? "bg-[#FFFFE1] border-[#7F9DB9]" // Estilo Dica Normal
-                : "bg-[#FFCC00] border-[#CC9900] font-bold" // Estilo Dica Super
-            } ${
-              // Adiciona estilo visual de desativado se não tiver pontos (opcional, mas ajuda UX)
-              (hintLevel === 0 && score < 300) ||
-              (hintLevel === 1 && score < 600)
-                ? "opacity-50 cursor-not-allowed"
-                : ""
+        {/* VISUALIZAÇÃO CONDICIONAL */}
+        {isLyricsMode ? (
+          /* MODO LETRAS: Papel Amarelo */
+          <div className="bg-[#FFFBE6] text-gray-800 p-6 rounded shadow-lg max-w-md w-full text-center border border-[#D4C495] relative transform rotate-1 transition-transform hover:rotate-0">
+            {/* Pin vermelho no topo */}
+            <div className="absolute -top-3 left-1/2 w-4 h-4 rounded-full bg-red-500 shadow-md border border-red-700 transform -translate-x-1/2"></div>
+
+            <h3 className="text-[#003399] font-bold text-xs uppercase tracking-widest mb-4 border-b border-gray-300 pb-2">
+              Adivinha a Letra
+            </h3>
+            <p className="text-sm md:text-lg font-serif italic leading-relaxed whitespace-pre-line">
+              "{currentTrack.lyricsSnippet || "Letra indisponível..."}"
+            </p>
+          </div>
+        ) : (
+          /* MODO ÁUDIO: Vinil Giratório */
+          <div
+            className={`w-40 h-40 rounded-full border-8 border-[#111] flex items-center justify-center bg-[#222] shadow-2xl ${
+              isPlaying && !isAnswered ? "animate-spin" : ""
             }`}
-            title={hintLevel === 0 ? "Cost: 300 pts" : "Cost: 600 pts"}
+            style={{ animationDuration: "4s" }}
           >
-            {hintLevel === 0 ? "💡 Hint (-300pts)" : "🔥 Super Hint (-600pts)"}
-          </button>
-        )}
-
-        {/* A Dica Ativa (Mostra o texto) */}
-        {hintText && !isAnswered && (
-          <div className="absolute top-8 z-20 bg-yellow-100 text-yellow-900 text-xs px-3 py-2 rounded border-2 border-yellow-400 shadow-lg animate-bounce whitespace-pre-line text-center">
-            {hintText}
+            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-red-600 to-red-800 border-2 border-gray-600 flex items-center justify-center">
+              <div className="w-2 h-2 bg-black rounded-full"></div>
+            </div>
           </div>
         )}
 
-        {/* Vinil */}
-        <div
-          className={`w-40 h-40 rounded-full border-8 border-[#111] flex items-center justify-center bg-[#222] shadow-2xl ${
-            isPlaying && !isAnswered ? "animate-spin" : ""
-          }`}
-          style={{ animationDuration: "4s" }}
-        >
-          <div className="w-16 h-16 rounded-full bg-gradient-to-br from-red-600 to-red-800 border-2 border-gray-600 flex items-center justify-center">
-            <div className="w-2 h-2 bg-black rounded-full"></div>
-          </div>
-        </div>
-
-        {!currentTrack.previewUrl && (
-          <div className="absolute bottom-2 text-xs text-red-400 bg-black/50 px-2 rounded">
-            No Preview Available
-          </div>
-        )}
-
-        {/* Revelação */}
+        {/* Revelação Final (Capa do álbum) */}
         {isAnswered && (
           <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center animate-fadeIn z-30">
             <img
               src={currentTrack.cover}
-              alt="Cover"
+              alt="Capa"
               className="w-40 h-40 object-cover border-4 border-white shadow-[0_0_15px_rgba(255,255,255,0.5)] mb-4"
             />
             <div className="text-white text-center px-4">
@@ -197,25 +151,25 @@ const QuizGame = ({ tracks, mode, onFinish }) => {
                 {currentTrack.title}
               </h3>
               <p className="text-sm text-gray-300">{currentTrack.artist}</p>
-              <p className="text-xs text-gray-500 mt-1 italic">
-                {currentTrack.album} ({currentTrack.year})
-              </p>
             </div>
           </div>
         )}
       </div>
 
-      {/* Opções */}
+      {/* Botões de Opção */}
       <div className="grid grid-cols-2 gap-2 h-32">
         {options.map((opt) => {
           let btnClass =
             "bg-gradient-to-b from-white to-[#ECE9D8] border border-[#003C74] text-[#003C74]";
+
           if (isAnswered) {
             if (opt.id === currentTrack.id)
-              btnClass = "bg-[#4CAF50] text-white font-bold border-[#2E7D32]";
+              btnClass =
+                "bg-[#4CAF50] text-white font-bold border-[#2E7D32]"; // Certa (Verde)
             else if (opt.id === selectedOption)
-              btnClass = "bg-[#F44336] text-white border-[#C62828]";
-            else btnClass = "opacity-40 grayscale";
+              btnClass =
+                "bg-[#F44336] text-white border-[#C62828]"; // Errada (Vermelho)
+            else btnClass = "opacity-40 grayscale"; // Outras
           } else {
             btnClass +=
               " hover:bg-[#FFFFCC] active:translate-y-[1px] hover:border-[#E6DB55]";
@@ -225,12 +179,10 @@ const QuizGame = ({ tracks, mode, onFinish }) => {
             <button
               key={opt.id}
               onClick={() => handleAnswer(opt.id)}
-              className={`rounded-[3px] p-2 text-xs font-bold shadow-sm transition-all duration-75 relative overflow-hidden ${btnClass}`}
+              className={`rounded-[3px] p-2 text-xs font-bold shadow-sm transition-all duration-75 ${btnClass}`}
               disabled={isAnswered}
             >
-              <span className="relative z-10 pointer-events-none">
-                {opt.artist} - {opt.title}
-              </span>
+              {opt.title}
             </button>
           );
         })}

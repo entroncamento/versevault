@@ -6,32 +6,19 @@ import "dotenv/config";
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// --- CONFIGURAÇÃO DE CHAVES ---
+// --- CONFIGURAÇÃO ---
 const GENIUS_TOKEN = process.env.GENIUS_ACCESS_TOKEN;
 const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID;
 const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
 
+// Já não precisamos da chave da Musixmatch!
 if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET) {
-  console.warn(
-    "⚠️ AVISO: SPOTIFY_CLIENT_ID ou SECRET não configurados no .env!"
-  );
+  console.warn("⚠️ AVISO: Chaves Spotify não configuradas no .env!");
 }
 
-// --- CORS ---
-const allowedOrigins = ["http://localhost:5173", "http://127.0.0.1:5173"];
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) callback(null, true);
-      else callback(new Error("Bloqueado pelo CORS"));
-    },
-  })
-);
+app.use(cors({ origin: ["http://localhost:5173", "http://127.0.0.1:5173"] }));
 
-const UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36";
-
-// --- GESTOR DE TOKEN SPOTIFY ---
+// --- TOKEN MANAGER ---
 let spotifyToken = null;
 let tokenExpiration = 0;
 
@@ -40,7 +27,6 @@ const getSpotifyToken = async () => {
   if (spotifyToken && now < tokenExpiration) return spotifyToken;
 
   try {
-    console.log("🔄 A renovar token Spotify...");
     const params = new URLSearchParams();
     params.append("grant_type", "client_credentials");
     const authStr = Buffer.from(
@@ -67,8 +53,7 @@ const getSpotifyToken = async () => {
   }
 };
 
-// --- HELPERS & FALLBACKS ---
-
+// --- HELPERS ---
 const cleanStr = (s) =>
   s
     ? s
@@ -78,115 +63,180 @@ const cleanStr = (s) =>
         .trim()
     : "";
 
-// 1. Fallback: iTunes
-async function fetchItunesPreview(title, artist) {
+async function fetchPreview(title, artist) {
   try {
     const term = `${cleanStr(title)} ${cleanStr(artist)}`;
-    const url = `https://itunes.apple.com/search?term=${encodeURIComponent(
-      term
-    )}&entity=song&limit=3`;
-
-    const res = await axios.get(url, { timeout: 2500 });
-    const match = res.data.results.find(
-      (t) => t.previewUrl && cleanStr(t.trackName).includes(cleanStr(title))
+    const res1 = await axios.get(
+      `https://itunes.apple.com/search?term=${encodeURIComponent(
+        term
+      )}&entity=song&limit=1`,
+      { timeout: 1500 }
     );
-    return match ? match.previewUrl : null;
-  } catch {
-    return null;
-  }
-}
+    if (res1.data.results?.[0]?.previewUrl)
+      return res1.data.results[0].previewUrl;
+  } catch {}
 
-// 2. Fallback: Deezer (Salva artistas PT/Hip-Hop)
-async function fetchDeezerPreview(title, artist) {
   try {
     const q = `artist:"${cleanStr(artist)}" track:"${cleanStr(title)}"`;
-    const url = `https://api.deezer.com/search?q=${encodeURIComponent(
-      q
-    )}&limit=1`;
+    const res2 = await axios.get(
+      `https://api.deezer.com/search?q=${encodeURIComponent(q)}&limit=1`,
+      { timeout: 1500 }
+    );
+    if (res2.data.data?.[0]?.preview) return res2.data.data[0].preview;
+  } catch {}
 
-    const res = await axios.get(url, { timeout: 2500 });
-    if (res.data.data && res.data.data.length > 0) {
-      return res.data.data[0].preview;
-    }
-    return null;
-  } catch {
-    return null;
-  }
+  return null;
 }
 
-// --- ENDPOINT DE PESQUISA ---
-app.get("/api/search", async (req, res) => {
+// --- NOVA FUNÇÃO DE LETRAS (GRÁTIS - lyrics.ovh) ---
+async function fetchLyrics(title, artist) {
   try {
-    const { q, type } = req.query;
-    const token = await getSpotifyToken();
-    console.log(`🔍 A procurar: "${q}" [${type || "track"}]`);
+    // Limpeza extra para aumentar a probabilidade de match na API gratuita
+    // Removemos "(Remix)", "(Live)", "feat." e pegamos só o artista principal
+    const cleanT = title.split("(")[0].split("-")[0].trim();
+    const cleanA = artist.split(",")[0].split("&")[0].trim();
 
-    // 1. Buscar lista de músicas ao Spotify
-    // AUMENTÁMOS O LIMIT PARA 50 para ter material suficiente para a curva de dificuldade
+    console.log(`📜 A buscar letra: ${cleanA} - ${cleanT}`);
+
+    const url = `https://api.lyrics.ovh/v1/${encodeURIComponent(
+      cleanA
+    )}/${encodeURIComponent(cleanT)}`;
+    const res = await axios.get(url, { timeout: 4000 }); // Timeout mais longo, APIs grátis podem ser lentas
+
+    if (res.data && res.data.lyrics) {
+      const lyrics = res.data.lyrics;
+
+      // Limpeza da letra
+      const lines = lyrics
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l !== "" && !l.startsWith("[")); // Remove linhas vazias e headers como [Chorus]
+
+      if (lines.length < 5) return null; // Letra muito curta não serve
+
+      // --- ALGORITMO DE "SNIPPET" ALEATÓRIO ---
+      // Em vez de dar o início (que é fácil), pegamos 4 linhas do meio da música
+      const maxStart = lines.length - 5;
+      const randomStart = Math.floor(Math.random() * maxStart);
+      const snippet = lines.slice(randomStart, randomStart + 4).join("\n");
+
+      return snippet;
+    }
+  } catch (e) {
+    // É normal falhar em algumas, ignoramos silenciosamente
+    // console.log("Letra não encontrada para: " + title);
+  }
+  return null;
+}
+
+// --- ENDPOINT GERADOR DE JOGO ---
+app.get("/api/game/generate", async (req, res) => {
+  try {
+    const { mode, query } = req.query;
+    const token = await getSpotifyToken();
+
+    let searchTerm = query;
+
+    if (mode === "ARTIST" || mode === "LYRICS") {
+      searchTerm = `artist:${query}`;
+    } else if (mode === "GENRE") {
+      searchTerm = `genre:${query}`;
+    } else if (mode === "RANDOM") {
+      const chars = "abcdefghijklmnopqrstuvwxyz";
+      searchTerm = chars[Math.floor(Math.random() * chars.length)];
+    }
+
+    console.log(`🎮 A Gerar Jogo: [${mode}] "${searchTerm}"`);
+
+    // 1. Buscar 50 músicas
     const spotifyRes = await axios.get("https://api.spotify.com/v1/search", {
-      params: {
-        q: type === "artist" ? `artist:${q}` : q,
-        type: "track",
-        limit: 50,
-      },
+      params: { q: searchTerm, type: "track", limit: 50 },
       headers: { Authorization: `Bearer ${token}` },
     });
 
-    const tracks = spotifyRes.data.tracks.items;
+    const rawTracks = spotifyRes.data.tracks.items;
+    if (!rawTracks.length)
+      return res.status(404).json({ error: "No tracks found" });
 
-    // 2. Tentar encontrar áudio (Spotify -> iTunes -> Deezer)
-    const promises = tracks.map(async (t) => {
-      const lowerTitle = t.name.toLowerCase();
-      if (lowerTitle.includes("karaoke") || lowerTitle.includes("instrumental"))
-        return null;
+    // 2. Deduplicação
+    const uniqueTracks = [];
+    const seenNames = new Set();
+    for (const t of rawTracks) {
+      const cleanName = cleanStr(t.name);
+      if (
+        seenNames.has(cleanName) ||
+        cleanName.includes("karaoke") ||
+        cleanName.includes("instrumental")
+      )
+        continue;
+      seenNames.add(cleanName);
+      uniqueTracks.push(t);
+    }
 
-      let preview = t.preview_url;
+    // 3. Ordenar por Popularidade
+    uniqueTracks.sort((a, b) => b.popularity - a.popularity);
 
-      if (!preview)
-        preview = await fetchItunesPreview(t.name, t.artists[0].name);
-      if (!preview)
-        preview = await fetchDeezerPreview(t.name, t.artists[0].name);
+    // 4. Selecionar Candidatas (Prioridade aos Hits para ter letras mais prováveis)
+    // No modo Lyrics, tentamos usar músicas mais famosas porque é mais provável terem letra na API
+    const candidates = uniqueTracks.slice(0, 20); // Top 20 hits
 
-      if (!preview) return null;
+    // 5. Resolver Recursos (Áudio ou Letra)
+    const finalGameTracks = [];
 
-      return {
-        id: `spot-${t.id}`,
+    // Processamos sequencialmente para não "matar" a API gratuita com 20 pedidos simultâneos
+    for (const t of candidates) {
+      if (finalGameTracks.length >= 12) break;
+
+      let gameData = {
+        id: t.id,
         title: t.name,
         artist: t.artists.map((a) => a.name).join(", "),
-        normalizedArtist: t.artists[0].name.toLowerCase(),
         cover: t.album.images[0]?.url,
-        previewUrl: preview,
-        popularity: t.popularity, // <--- IMPORTANTE: Envia a popularidade (0-100)
-        source: "Hybrid",
+        year: t.album.release_date.split("-")[0],
+        album: t.album.name,
+        popularity: t.popularity,
+        gameMode: mode,
       };
-    });
 
-    const results = await Promise.all(promises);
-    const finalData = results.filter((r) => r !== null);
+      if (mode === "LYRICS") {
+        // Modo Letra: Usa a API grátis
+        const lyrics = await fetchLyrics(t.name, t.artists[0].name);
+        if (lyrics) {
+          gameData.lyricsSnippet = lyrics;
+          finalGameTracks.push(gameData);
+        }
+      } else {
+        // Modos Normais: Precisa de Preview
+        let preview = t.preview_url;
+        if (!preview) preview = await fetchPreview(t.name, t.artists[0].name);
+        if (preview) {
+          gameData.previewUrl = preview;
+          finalGameTracks.push(gameData);
+        }
+      }
+    }
 
-    console.log(`✅ Encontradas ${finalData.length} músicas com áudio.`);
-    res.json(finalData);
+    console.log(`✅ Jogo criado com ${finalGameTracks.length} faixas.`);
+
+    // Se não encontrarmos letras suficientes, avisamos o frontend
+    if (finalGameTracks.length < 4) {
+      return res.status(404).json({ error: "Not enough data found" });
+    }
+
+    res.json(finalGameTracks);
   } catch (error) {
-    console.error("❌ Erro Search:", error.message);
-    res.status(500).json({ error: "Erro na pesquisa" });
+    console.error("❌ Erro ao gerar jogo:", error.message);
+    res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
 // --- ENDPOINT GENIUS ---
 app.get("/api/genius/snippet", async (req, res) => {
-  try {
-    const { t, a } = req.query;
-    const response = await axios.get("https://api.genius.com/search", {
-      params: { q: `${t} ${a}` },
-      headers: { Authorization: `Bearer ${GENIUS_TOKEN}`, "User-Agent": UA },
-    });
-    const hits = response.data.response.hits;
-    res.json({ url: hits.length > 0 ? hits[0].result.url : null });
-  } catch {
-    res.json({ url: null });
-  }
+  res.json({ url: null });
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor com Deezer+iTunes+Spotify na porta ${PORT}`);
+  console.log(
+    `🚀 Servidor VerseVault (Free Edition) a correr na porta ${PORT}`
+  );
 });

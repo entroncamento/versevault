@@ -1,13 +1,16 @@
 import React, { useState } from "react";
 import QuizLobby from "./quiz/QuizLobby";
+import QuizSetup from "./quiz/QuizSetup";
 import QuizGame from "./quiz/QuizGame";
 import QuizResults from "./quiz/QuizResults";
-import { musicApi } from "../services/musicApi";
 import { useAuth } from "../contexts/AuthContext";
 import { leaderboardApi } from "../services/leaderboardApi";
 
+const PROXY_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";
+
 const APP_STATE = {
   LOBBY: "LOBBY",
+  SETUP: "SETUP",
   LOADING: "LOADING",
   PLAYING: "PLAYING",
   RESULTS: "RESULTS",
@@ -21,32 +24,40 @@ const QuizApp = () => {
   const [tracks, setTracks] = useState([]);
   const [finalScore, setFinalScore] = useState(0);
 
-  const handleStartGame = async (mode) => {
+  // 1. Selecionar Modo (Vem do Lobby)
+  const handleSelectMode = (mode) => {
     setGameMode(mode);
+
+    if (mode === "RANDOM") {
+      // Random não precisa de configuração, arranca logo
+      handleStartSearch("random");
+    } else {
+      // Artista, Género ou Letras vão para o ecrã de Setup
+      setGameState(APP_STATE.SETUP);
+    }
+  };
+
+  // 2. Iniciar Pesquisa (Vem do Setup ou Random)
+  const handleStartSearch = async (query) => {
     setGameState(APP_STATE.LOADING);
 
-    let query = "";
-
-    if (mode === "ARTIST") {
-      query = prompt("Which artist do you want to master?", "The Weeknd");
-      if (!query) {
-        setGameState(APP_STATE.LOBBY);
-        return;
-      }
-    } else if (mode === "GENRE") {
-      query = prompt("Pick a genre (Rock, Pop, Jazz...)", "Rock");
-      if (!query) {
-        setGameState(APP_STATE.LOBBY);
-        return;
-      }
-    }
-
     try {
-      const fetchedTracks = await musicApi.getGameData(mode, query);
+      // Chama o novo endpoint inteligente do backend
+      const res = await fetch(
+        `${PROXY_BASE}/api/game/generate?mode=${gameMode}&query=${encodeURIComponent(
+          query
+        )}`
+      );
+
+      if (!res.ok) throw new Error("Failed to fetch game data");
+
+      const fetchedTracks = await res.json();
 
       if (fetchedTracks.length < 4) {
-        alert("Not enough tracks found! Try a different artist.");
-        setGameState(APP_STATE.LOBBY);
+        alert(
+          "Não foram encontradas músicas suficientes! Tenta outro termo de pesquisa."
+        );
+        setGameState(APP_STATE.SETUP);
         return;
       }
 
@@ -80,17 +91,26 @@ const QuizApp = () => {
   const renderContent = () => {
     switch (gameState) {
       case APP_STATE.LOBBY:
-        return <QuizLobby onStartGame={handleStartGame} />;
+        return <QuizLobby onStartGame={handleSelectMode} />;
+
+      case APP_STATE.SETUP:
+        return (
+          <QuizSetup
+            mode={gameMode}
+            onStart={handleStartSearch}
+            onBack={() => setGameState(APP_STATE.LOBBY)}
+          />
+        );
 
       case APP_STATE.LOADING:
         return (
           <div className="h-full flex flex-col items-center justify-center bg-[#ECE9D8]">
-            <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4"></div>
-            <p className="font-bold text-[#003399]">
-              Consulting the Archives...
+            <div className="w-8 h-8 border-4 border-[#003399] border-t-transparent rounded-full animate-spin mb-4"></div>
+            <p className="font-bold text-[#003399] text-sm">
+              A preparar o Quiz...
             </p>
-            <p className="text-xs text-gray-500 mt-2">
-              Syncing Last.fm & iTunes Data...
+            <p className="text-xs text-gray-500 mt-1">
+              A consultar os arquivos musicais...
             </p>
           </div>
         );
@@ -117,20 +137,28 @@ const QuizApp = () => {
       case APP_STATE.ERROR:
         return (
           <div className="h-full flex flex-col items-center justify-center bg-[#ECE9D8] text-center p-4">
-            <h3 className="text-red-600 font-bold mb-2">Connection Error</h3>
-            <p className="text-sm text-gray-600 mb-4">
-              Check your API Keys or Internet.
+            <img
+              src="/icons/doctor_watson.png"
+              alt="Error"
+              className="w-12 h-12 mb-2 opacity-70"
+              onError={(e) => (e.target.style.display = "none")}
+            />
+            <h3 className="text-red-600 font-bold mb-1 text-sm">
+              Erro de Sistema
+            </h3>
+            <p className="text-xs text-gray-600 mb-4 max-w-[200px]">
+              Ocorreu um erro ao comunicar com o servidor VerseVault.
             </p>
             <button
               onClick={handleExit}
-              className="px-4 py-1 bg-gray-200 border border-gray-400 rounded shadow text-xs"
+              className="px-4 py-1 bg-[#F0F0F0] border border-gray-500 rounded shadow-[1px_1px_0px_white_inset] text-xs active:translate-y-px"
             >
-              Back
+              Fechar
             </button>
           </div>
         );
       default:
-        return <div>Error</div>;
+        return null;
     }
   };
 
