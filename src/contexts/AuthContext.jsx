@@ -1,3 +1,4 @@
+// Ficheiro: src/contexts/AuthContext.jsx
 import React, { createContext, useContext, useState, useEffect } from "react";
 import {
   auth,
@@ -6,7 +7,7 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut,
-} from "../firebase"; // Nota: Certifica-te que o firebase.js está em src/
+} from "../firebase";
 import { onAuthStateChanged } from "firebase/auth";
 
 const AuthContext = createContext();
@@ -45,7 +46,14 @@ export const AuthProvider = ({ children }) => {
 
   return (
     <AuthContext.Provider value={value}>
-      {!loading && children}
+      {/* Renderiza children apenas quando o loading terminar */}
+      {!loading ? (
+        children
+      ) : (
+        <div className="w-full h-screen bg-black text-white flex items-center justify-center">
+          Carregando Sistema...
+        </div>
+      )}
     </AuthContext.Provider>
   );
 };
