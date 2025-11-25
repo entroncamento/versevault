@@ -1,0 +1,22 @@
+/* Importar a fonte Tahoma (TEM DE SER A PRIMEIRA LINHA) */
+@import url("https://fonts.googleapis.com/css2?family=Tahoma:wght@400;700&display=swap");
+
+/* As 3 diretivas MÁGICAS do Tailwind */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Estilos base CORRIGIDOS */
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  font-family: "Tahoma", sans-serif;
+}
+
+body {
+  background-color: #3a6ea5; /* Cor de fallback */
+}
