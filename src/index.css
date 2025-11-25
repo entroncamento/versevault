@@ -1,5 +1,4 @@
-/* Importar a fonte Tahoma (TEM DE SER A PRIMEIRA LINHA) */
-@import url("https://fonts.googleapis.com/css2?family=Tahoma:wght@400;700&display=swap");
+/* Ficheiro: src/index.css */
 
 /* As 3 diretivas MÁGICAS do Tailwind */
 @tailwind base;

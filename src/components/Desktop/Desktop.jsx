@@ -7,43 +7,49 @@ import Icon from "./Icon.jsx";
 import blissWallpaper from "/bliss.jpg";
 import computerIcon from "/icons/MyComputer.ico";
 import quizIcon from "/icons/Minesweeper.ico";
-import leaderboardIcon from "/icons/notepad.png"; // Podes mudar para um ícone de troféu se tiveres
+import leaderboardIcon from "/icons/notepad.png";
+import dailyDropIcon from "/icons/search.png"; // Novo ícone
 
 const Desktop = () => {
   const { windows, openWindow } = useWindowManager();
 
-  // Estado para gerir a seleção de ícones (clicar fora desmarca)
   const [selectedIconId, setSelectedIconId] = useState(null);
 
-  // Estado para gerir os ícones e as suas posições
   const [icons, setIcons] = useState([
-    // 1. My Computer (Topo)
+    // 1. My Computer
     {
       id: "computer",
       label: "My Computer",
       icon: computerIcon,
       action: "MY_COMPUTER",
-      position: { x: 20, y: 20 }, // Posição inicial (Coluna 1, Linha 1)
+      position: { x: 20, y: 20 },
     },
-    // 2. VerseVault Quiz (Meio)
+    // 2. VerseVault Quiz
     {
       id: "quiz",
       label: "VerseVault Quiz",
       icon: quizIcon,
       action: "QUIZ",
-      position: { x: 20, y: 110 }, // Posição inicial (Coluna 1, Linha 2)
+      position: { x: 20, y: 110 },
     },
-    // 3. Leaderboard (Fundo)
+    // 3. Leaderboard
     {
       id: "leaderboard",
-      label: "High Scores", // Ou Leaderboard
+      label: "High Scores",
       icon: leaderboardIcon,
       action: "LEADERBOARD",
-      position: { x: 20, y: 200 }, // Posição inicial (Coluna 1, Linha 3)
+      position: { x: 20, y: 200 },
+    },
+    // 4. Daily Drop (NOVO)
+    {
+      id: "dailydrop",
+      label: "Daily Drop",
+      icon: dailyDropIcon,
+      action: "DAILY_DROP",
+      position: { x: 20, y: 290 },
     },
   ]);
 
-  // Função para atualizar a posição de um ícone específico
   const moveIcon = (id, newPos) => {
     setIcons((prevIcons) =>
       prevIcons.map((icon) =>
@@ -56,10 +62,8 @@ const Desktop = () => {
     <div
       className="w-full h-full bg-cover bg-center relative overflow-hidden"
       style={{ backgroundImage: `url(${blissWallpaper})` }}
-      // Clicar no fundo do desktop desmarca o ícone selecionado
       onMouseDown={() => setSelectedIconId(null)}
     >
-      {/* Renderizar Ícones */}
       {icons.map((iconData) => (
         <Icon
           key={iconData.id}
@@ -74,7 +78,6 @@ const Desktop = () => {
         />
       ))}
 
-      {/* Renderizar Janelas */}
       {windows
         .filter((w) => !w.isMinimized)
         .map((window) => (

@@ -21,6 +21,10 @@ const QuizApp = () => {
   const { currentUser } = useAuth();
   const [gameState, setGameState] = useState(APP_STATE.LOBBY);
   const [gameMode, setGameMode] = useState(null);
+
+  // NOVO: Guardar a pesquisa para saber que género foi jogado
+  const [searchQuery, setSearchQuery] = useState("");
+
   const [tracks, setTracks] = useState([]);
   const [finalScore, setFinalScore] = useState(0);
 
@@ -39,6 +43,7 @@ const QuizApp = () => {
 
   // 2. Iniciar Pesquisa (Vem do Setup ou Random)
   const handleStartSearch = async (query) => {
+    setSearchQuery(query); // Guardamos o termo pesquisado
     setGameState(APP_STATE.LOADING);
 
     try {
@@ -69,12 +74,21 @@ const QuizApp = () => {
     }
   };
 
+  // 3. Finalizar Jogo
   const handleFinishGame = async (score) => {
     setFinalScore(score);
     setGameState(APP_STATE.RESULTS);
 
     if (currentUser && score > 0) {
-      await leaderboardApi.addScore(currentUser, score);
+      // Recolher metadados para as estatísticas de carreira
+      const artistsPlayed = tracks.map((t) => t.artist);
+      const genrePlayed = gameMode === "GENRE" ? searchQuery : null;
+
+      // Enviar para a API com os metadados extra
+      await leaderboardApi.addScore(currentUser, score, {
+        artists: artistsPlayed,
+        genre: genrePlayed,
+      });
     }
   };
 
@@ -107,10 +121,10 @@ const QuizApp = () => {
           <div className="h-full flex flex-col items-center justify-center bg-[#ECE9D8]">
             <div className="w-8 h-8 border-4 border-[#003399] border-t-transparent rounded-full animate-spin mb-4"></div>
             <p className="font-bold text-[#003399] text-sm">
-              A preparar o Quiz...
+              Preparing your quiz...
             </p>
             <p className="text-xs text-gray-500 mt-1">
-              A consultar os arquivos musicais...
+              Consulting the database
             </p>
           </div>
         );
@@ -144,10 +158,10 @@ const QuizApp = () => {
               onError={(e) => (e.target.style.display = "none")}
             />
             <h3 className="text-red-600 font-bold mb-1 text-sm">
-              Erro de Sistema
+              System Error
             </h3>
             <p className="text-xs text-gray-600 mb-4 max-w-[200px]">
-              Ocorreu um erro ao comunicar com o servidor VerseVault.
+              There was an error preparing the quiz. Please try again.
             </p>
             <button
               onClick={handleExit}

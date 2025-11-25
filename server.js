@@ -43,6 +43,9 @@ const getSpotifyToken = async () => {
     return spotifyToken;
   } catch (e) {
     console.error("❌ Erro Spotify Auth:", e.message);
+    if (e.response) {
+      console.error("Detalhes:", e.response.data);
+    }
     throw new Error("Falha na autenticação Spotify");
   }
 };
@@ -62,7 +65,6 @@ async function fetchPreview(title, artist) {
   const targetArtist = normalize(artist);
 
   try {
-    // 1. Tenta iTunes
     const term = `${title} ${artist}`;
     const res = await axios.get(
       `https://itunes.apple.com/search?term=${encodeURIComponent(
@@ -73,7 +75,6 @@ async function fetchPreview(title, artist) {
     if (res.data.resultCount > 0) {
       const exactMatch = res.data.results.find((track) => {
         const foundArtist = normalize(track.artistName);
-        // Validação simples de artista
         return (
           foundArtist.includes(targetArtist) ||
           targetArtist.includes(foundArtist)
@@ -82,7 +83,6 @@ async function fetchPreview(title, artist) {
       if (exactMatch && exactMatch.previewUrl) return exactMatch.previewUrl;
     }
 
-    // 2. Tenta Deezer
     const q = `artist:"${artist}" track:"${title}"`;
     const res2 = await axios.get(
       `https://api.deezer.com/search?q=${encodeURIComponent(q)}&limit=1`
@@ -103,7 +103,88 @@ function shuffleArray(array) {
   return array;
 }
 
-// --- ENDPOINT PRINCIPAL ---
+// --- WIKIPEDIA HELPER ---
+async function getWikiFact(artistName) {
+  try {
+    const res = await axios.get(
+      `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(
+        artistName
+      )}`
+    );
+    if (res.data.extract) {
+      const sentences = res.data.extract.split(". ");
+      const safeSentence =
+        sentences.find((s) => !s.includes(artistName)) || sentences[0];
+      return safeSentence + ".";
+    }
+  } catch (e) {
+    return "A legendary artist known worldwide.";
+  }
+  return "An iconic music figure.";
+}
+
+// =========================================================
+//                  ENDPOINT DAILY DROP
+// =========================================================
+app.get("/api/game/daily", async (req, res) => {
+  try {
+    const token = await getSpotifyToken();
+
+    // 1. Gerar Seed baseada no Dia (Data Atual)
+    const daySeed = Math.floor(Date.now() / 86400000);
+
+    // 2. Escolher um Offset "Aleatório" mas Determinístico
+    const offset = (daySeed * 17) % 500;
+
+    // 3. Buscar Artista ao Spotify (Artistas relevantes por popularidade)
+    const spotifyRes = await axios.get("https://api.spotify.com/v1/search", {
+      params: {
+        q: "year:1980-2023 genre:pop OR genre:rock OR genre:hip-hop",
+        type: "artist",
+        limit: 1,
+        offset: offset,
+      },
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    const artist = spotifyRes.data.artists.items[0];
+
+    if (!artist)
+      return res.status(404).json({ error: "Daily artist not found" });
+
+    // 4. Buscar Top Track para Dica
+    const topTracksRes = await axios.get(
+      `https://api.spotify.com/v1/artists/${artist.id}/top-tracks?market=US`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    const topTrack = topTracksRes.data.tracks[0]?.name || "Unknown Hit";
+
+    // 5. Buscar Facto Wiki
+    const fact = await getWikiFact(artist.name);
+
+    // 6. Construir Resposta do Jogo
+    const gameData = {
+      dayId: daySeed,
+      name: artist.name,
+      image: artist.images[0]?.url,
+      hints: [
+        `Genre: ${artist.genres.slice(0, 2).join(", ") || "Pop"}`,
+        `Popularity Score: ${artist.popularity}/100`,
+        `Biggest Hit: "${topTrack}"`,
+        `Fact: ${fact}`,
+      ],
+    };
+
+    res.json(gameData);
+  } catch (error) {
+    console.error("Daily Error:", error.message);
+    res.status(500).json({ error: "Server Error" });
+  }
+});
+
+// =========================================================
+//                  ENDPOINT QUIZ PRINCIPAL
+// =========================================================
 app.get("/api/game/generate", async (req, res) => {
   try {
     const { mode, query } = req.query;
@@ -123,7 +204,6 @@ app.get("/api/game/generate", async (req, res) => {
     let tracks = shuffleArray(spotifyRes.data.tracks.items);
     const finalGameTracks = [];
 
-    // Pool de Distratores (Músicas erradas do mesmo tema)
     const distractorPool = tracks.map((t) => ({
       id: t.id,
       title: t.name,
@@ -136,11 +216,9 @@ app.get("/api/game/generate", async (req, res) => {
       const artist = t.artists[0].name;
       const title = t.name;
 
-      // Garante que temos áudio
       let preview = t.preview_url || (await fetchPreview(title, artist));
       if (!preview) continue;
 
-      // Gera opções erradas
       const distractors = distractorPool
         .filter((d) => d.id !== t.id && d.title !== title)
         .sort(() => 0.5 - Math.random())
@@ -158,7 +236,7 @@ app.get("/api/game/generate", async (req, res) => {
         cover: t.album.images[0]?.url,
         gameMode: mode || "RANDOM",
         previewUrl: preview,
-        options: options, // O servidor já manda as opções baralhadas
+        options: options,
       });
     }
 
@@ -169,6 +247,9 @@ app.get("/api/game/generate", async (req, res) => {
     res.json(finalGameTracks);
   } catch (error) {
     console.error("Erro Fatal:", error.message);
+    if (error.response) {
+      console.error("Response data:", error.response.data);
+    }
     res.status(500).json({ error: "Server Error" });
   }
 });

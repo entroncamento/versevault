@@ -1,3 +1,6 @@
+// Ficheiro: src/services/musicApi.js
+
+// A URL base do backend continua a ser necessária para outras chamadas (se existirem no futuro)
 const PROXY_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";
 const WIKIPEDIA_BASE = "https://en.wikipedia.org/api/rest_v1/page/summary";
 
@@ -21,52 +24,46 @@ const WikipediaService = {
 const GeniusService = {
   async getSnippet(t, a) {
     try {
+      // CORREÇÃO: Removemos o ${PROXY_BASE} para usar o caminho relativo.
+      // Isto ativa o proxy configurado no vite.config.js que aponta para https://api.genius.com
       const res = await fetch(
-        `${PROXY_BASE}/api/genius/snippet?t=${encodeURIComponent(
-          t
-        )}&a=${encodeURIComponent(a)}`
+        `/api/genius/search?q=${encodeURIComponent(t + " " + a)}`
       );
+
+      // Nota: A API do Genius retorna dados complexos.
+      // Se estiveres a usar a API pública, o endpoint correto costuma ser /search
       const data = await res.json();
-      return data.snippet || data.url || null;
-    } catch {
+
+      // Lógica simplificada para tentar obter algo útil
+      if (
+        data.response &&
+        data.response.hits &&
+        data.response.hits.length > 0
+      ) {
+        return data.response.hits[0].result.url;
+      }
+      return null;
+    } catch (e) {
+      console.error("Erro no Genius Fetch:", e);
       return null;
     }
   },
 };
 
-// Fallback Word Bank (só usado se o servidor falhar)
-const WORD_BANK = [
-  "Love",
-  "Hate",
-  "Pain",
-  "Joy",
-  "Hope",
-  "Fear",
-  "Dream",
-  "Soul",
-  "Music",
-  "Song",
-  "Night",
-  "Day",
-  "Life",
-  "Time",
-  "World",
-];
-
 export const musicApi = {
-  // Agora aceita opções vindas do backend
+  // Gera opções de resposta baseadas nas outras faixas disponíveis
   generateOptions(correctTrack, allTracks) {
-    // SE o servidor já enviou opções curadas (do mesmo género), usa-as!
     if (correctTrack.options && correctTrack.options.length > 0) {
       return correctTrack.options;
     }
 
-    // Fallback antigo (Client-side random)
     if (!allTracks || !correctTrack) return [];
+
     let others = allTracks
       .filter((t) => t.id !== correctTrack.id)
       .sort(() => 0.5 - Math.random())
       .slice(0, 3);
+
     while (others.length < 3 && allTracks.length > 1) {
       const random = allTracks[Math.floor(Math.random() * allTracks.length)];
       if (
@@ -79,30 +76,11 @@ export const musicApi = {
     return [...others, correctTrack].sort(() => 0.5 - Math.random());
   },
 
-  // Agora aceita opções de palavras vindas do backend
-  generateWordOptions(correctWord, serverWordOptions) {
-    // SE o servidor enviou opções da própria letra, usa-as!
-    if (serverWordOptions && serverWordOptions.length > 0) {
-      return serverWordOptions;
-    }
-
-    // Fallback antigo
-    if (!correctWord) return ["???", "Error", "Retry", "Loading"];
-
-    const cleanCorrect = correctWord.toLowerCase();
-    const candidates = WORD_BANK.filter(
-      (w) => w.toLowerCase() !== cleanCorrect
-    );
-    const shuffled = candidates.sort(() => 0.5 - Math.random());
-
-    return [...shuffled.slice(0, 3), correctWord].sort(
-      () => 0.5 - Math.random()
-    );
-  },
-
+  // Função placeholder para manter compatibilidade, caso seja chamada
   async getGameData(mode, query) {
     return [];
   },
+
   async getHint(t, a) {
     return await GeniusService.getSnippet(t, a);
   },

@@ -70,7 +70,6 @@ const StartMenu = ({ onClose }) => {
     "Administrator";
   const userPhoto = currentUser?.photoURL || "/icons/Minesweeper.ico";
 
-  // Fechar ao clicar fora
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (menuRef.current && !menuRef.current.contains(event.target)) {
@@ -82,12 +81,6 @@ const StartMenu = ({ onClose }) => {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [onClose]);
 
-  const handleEditProfile = () => {
-    console.log("Abrir página de editar perfil");
-    onClose();
-  };
-
-  // Funções auxiliares para abrir Apps
   const handleOpenApp = (appKey) => {
     openWindow(appKey);
     onClose();
@@ -98,14 +91,10 @@ const StartMenu = ({ onClose }) => {
       ref={menuRef}
       className="absolute bottom-[30px] left-0 z-[9999] font-sans select-none animate-in fade-in slide-in-from-bottom-2 duration-150"
     >
-      {/* Container Principal com Cores do Config */}
       <div className="w-[380px] h-[420px] rounded-t-lg bg-xp-start-border p-[2px] pr-[3px] pb-0 shadow-xp-start flex flex-col">
-        {/* --- HEADER --- */}
+        {/* HEADER */}
         <div className="h-16 bg-xp-header-gradient rounded-t-[5px] relative flex items-center px-2 shadow-[inset_0px_1px_2px_rgba(255,255,255,0.5)] overflow-hidden">
-          {/* Linha de brilho no topo */}
           <div className="absolute top-0 left-0 w-full h-[1px] bg-white/40" />
-
-          {/* Foto do User */}
           <div className="w-12 h-12 bg-xp-start-bodyRight rounded-[3px] border-[2px] border-white shadow-sm ml-1 mr-3 overflow-hidden flex-shrink-0">
             <img
               src={userPhoto}
@@ -113,40 +102,43 @@ const StartMenu = ({ onClose }) => {
               alt="User"
             />
           </div>
-
-          {/* Nome do User */}
           <span
             className="text-white font-bold text-[15px] truncate tracking-wide"
             style={{ textShadow: "1px 1px 2px rgba(0,0,0,0.6)" }}
           >
             {displayName}
           </span>
-
-          {/* Faixa Laranja */}
           <div className="absolute bottom-0 left-0 w-full h-[2px] bg-xp-start-orange shadow-[0_-1px_0_rgba(0,0,0,0.1)]" />
         </div>
 
-        {/* --- CORPO --- */}
+        {/* CORPO */}
         <div className="flex flex-1 bg-white">
-          {/* ESQUERDA (Seus itens originais) */}
+          {/* ESQUERDA (Apps Pinned) */}
           <div className="flex-[5] bg-xp-start-bodyLeft flex flex-col py-2 border-r border-xp-start-bodyRight">
+            {/* ATALHO NOVO: Daily Drop Challenge */}
+            <LeftMenuItem
+              title="Daily Drop Challenge"
+              isBold
+              icon="/icons/search.png"
+              onClick={() => handleOpenApp("DAILY_DROP")}
+            />
+
+            <div className="h-[1px] bg-gradient-to-r from-transparent via-[#D6D3CE] to-transparent my-1 mx-2" />
+
             <LeftMenuItem
               title="My Computer"
-              isBold
               icon="/icons/MyComputer.ico"
               onClick={() => handleOpenApp("MY_COMPUTER")}
             />
 
             <LeftMenuItem
               title="VerseVault Quiz"
-              isBold
               icon="/icons/Minesweeper.ico"
               onClick={() => handleOpenApp("QUIZ")}
             />
 
             <LeftMenuItem
               title="Leaderboard"
-              isBold
               icon="/icons/notepad.png"
               onClick={() => handleOpenApp("LEADERBOARD")}
             />
@@ -154,7 +146,7 @@ const StartMenu = ({ onClose }) => {
             <div className="flex-grow" />
           </div>
 
-          {/* DIREITA (Seus itens originais) */}
+          {/* DIREITA */}
           <div className="flex-[4] bg-xp-start-bodyRight py-2 px-1">
             <RightMenuItem
               title="Edit Profile"
@@ -162,13 +154,11 @@ const StartMenu = ({ onClose }) => {
               icon="/icons/notepad.png"
               onClick={() => handleOpenApp("USER_ACCOUNTS")}
             />
-
-            {/* Espaço vazio para manter o layout consistente se quiseres adicionar mais tarde */}
             <div className="flex-grow" />
           </div>
         </div>
 
-        {/* --- FOOTER --- */}
+        {/* FOOTER */}
         <div className="h-10 bg-xp-start-footer flex items-center justify-end px-3 pt-[1px] border-t border-white/30 shadow-[inset_0_2px_2px_rgba(0,0,0,0.1)]">
           <button
             onClick={logout}
@@ -183,7 +173,7 @@ const StartMenu = ({ onClose }) => {
           </button>
 
           <button
-            onClick={() => window.location.reload()} // Simula restart
+            onClick={() => window.location.reload()}
             className="flex items-center px-2 py-1 hover:bg-xp-start-hover hover:shadow-inner rounded-[3px] transition-all group"
           >
             <div className="bg-[#D6382D] p-[2px] rounded-[2px] shadow-sm border border-white/40 mr-1.5 text-white">
