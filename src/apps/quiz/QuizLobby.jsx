@@ -28,7 +28,8 @@ const QuizLobby = ({ onStartGame }) => {
 
       {/* Content */}
       <div className="flex-grow p-6 overflow-y-auto">
-        <div className="bg-white border border-[#7F9DB9] p-4 rounded-sm h-full shadow-inner">
+        {/* CORREÇÃO AQUI: Troquei 'h-full' por 'min-h-full' */}
+        <div className="bg-white border border-[#7F9DB9] p-4 rounded-sm min-h-full shadow-inner">
           <h2 className="text-sm font-bold text-gray-700 mb-4 border-b border-gray-300 pb-1">
             Select Mode
           </h2>

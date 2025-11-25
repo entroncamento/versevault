@@ -2,27 +2,23 @@ import express from "express";
 import cors from "cors";
 import axios from "axios";
 import "dotenv/config";
-import fs from "fs";
 import multer from "multer";
 import OpenAI from "openai";
+import { Client as GeniusClient } from "genius-lyrics"; // Nova biblioteca
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-const upload = multer({ dest: "uploads/" });
+const genius = new GeniusClient(); // Não precisa de chave para o básico
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
 
 // --- CONFIGURAÇÃO ---
-const GENIUS_TOKEN = process.env.GENIUS_ACCESS_TOKEN;
 const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID;
 const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
 
-app.use(cors({ origin: ["http://localhost:5173", "http://127.0.0.1:5173"] }));
+app.use(cors({ origin: "*" })); // Temporariamente "*" para facilitar testes, depois restringe
 
-// --- TOKEN MANAGER ---
+// --- TOKEN MANAGER SPOTIFY ---
 let spotifyToken = null;
 let tokenExpiration = 0;
 
@@ -38,7 +34,7 @@ const getSpotifyToken = async () => {
     ).toString("base64");
 
     const res = await axios.post(
-      "https://accounts.spotify.com/api/token",
+      "https://accounts.spotify.com/api/token", // URL Corrigida
       params,
       {
         headers: {
@@ -49,7 +45,7 @@ const getSpotifyToken = async () => {
     );
 
     spotifyToken = res.data.access_token;
-    tokenExpiration = now + (res.data.expires_in - 300) * 1000;
+    tokenExpiration = now + (res.data.expires_in - 60) * 1000;
     return spotifyToken;
   } catch (e) {
     console.error("❌ Erro Spotify Auth:", e.message);
@@ -57,246 +53,319 @@ const getSpotifyToken = async () => {
   }
 };
 
-// --- HELPERS DE LIMPEZA ---
-const cleanStr = (s) =>
-  s
-    ? s
-        .toLowerCase()
-        .replace(/[\(\[].*?[\)\]]/g, "")
-        .replace(/feat\..*/g, "")
-        .replace(/- remastered.*/g, "")
-        .trim()
-    : "";
+// --- PREVIEW AUDIO (iTunes Fallback com Validação Rigorosa) ---
+async function fetchPreview(title, artist) {
+  // Helper para normalizar texto (tira acentos, caracteres especiais e mete minúsculas)
+  const normalize = (str) =>
+    str
+      ? str
+          .toLowerCase()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/[^a-z0-9 ]/g, "")
+          .trim()
+      : "";
 
-// Limpa HTML e Caracteres Estranhos
-const cleanHtml = (html) => {
-  if (!html) return "";
-  return html
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<[^>]+>/g, "") // Remove tags HTML
-    .replace(/\[.*?\]/g, "") // Remove [Verse], etc.
-    .replace(/&/g, "&")
-    .replace(/"/g, '"')
-    .replace(/'/g, "'")
-    .replace(/'/g, "'")
-    .replace(/'/g, "'")
-    .replace(/</g, "<")
-    .replace(/>/g, ">")
-    .replace(/ /g, " ")
-    .replace(/\\"/g, '"')
-    .trim();
-};
+  const targetArtist = normalize(artist);
+  const targetTitle = normalize(title);
 
-// --- LÓGICA INTELIGENTE (Smart Sync) ---
-function processLyricsForGame(fullLyrics) {
-  if (!fullLyrics) return null;
+  // Palavras-chave a evitar se não estiverem na busca original
+  const badKeywords = [
+    "cover",
+    "karaoke",
+    "tribute",
+    "instrumental",
+    "ringtone",
+    "type beat",
+    "remix",
+  ];
 
-  // 1. Limpeza básica inicial
-  let text = fullLyrics
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/"/g, '"')
-    .replace(/'/g, "'");
+  try {
+    // 1. Tenta iTunes (Melhor qualidade e gratuito)
+    const term = `${title} ${artist}`;
+    // Pedimos 10 resultados para ter uma boa margem de filtragem
+    const res = await axios.get(
+      `https://itunes.apple.com/search?term=${encodeURIComponent(
+        term
+      )}&entity=song&limit=10`
+    );
 
-  // 2. Tenta encontrar o REFRÃO (Chorus)
-  const chorusRegex = /\[(Chorus|Hook|Refrain|Refrão).*?\]/i;
-  const match = text.match(chorusRegex);
+    if (res.data.resultCount > 0) {
+      // Filtra e encontra a melhor correspondência
+      const exactMatch = res.data.results.find((track) => {
+        const foundArtist = normalize(track.artistName);
+        const foundTitle = normalize(track.trackName);
 
-  let snippetLines = [];
+        // Verificação 1: O artista deve conter o artista alvo OU o inverso
+        const artistMatch =
+          foundArtist.includes(targetArtist) ||
+          targetArtist.includes(foundArtist);
 
-  if (match) {
-    const startIndex = match.index + match[0].length;
-    const chorusText = text.substring(startIndex);
-    const cleanChorus = cleanHtml(chorusText);
-    const lines = cleanChorus
-      .split("\n")
-      .map((l) => l.trim())
-      .filter((l) => l.length > 10 && !l.startsWith("["));
-    snippetLines = lines.slice(0, 4);
+        // Verificação 2: O título deve ser similar (Check Duplo)
+        const titleMatch =
+          foundTitle.includes(targetTitle) || targetTitle.includes(foundTitle);
+
+        // Verificação 3: Evitar Covers/Karaoke se não pedido
+        // Se o título original NÃO tem "cover", rejeita resultados que tenham "cover"
+        const isBad =
+          !targetTitle.includes("cover") &&
+          badKeywords.some(
+            (bad) => foundTitle.includes(bad) || foundArtist.includes(bad)
+          );
+
+        // Só aceita se tudo bater certo
+        return artistMatch && titleMatch && !isBad;
+      });
+
+      if (exactMatch && exactMatch.previewUrl) {
+        return exactMatch.previewUrl;
+      }
+    }
+
+    // 2. Tenta Deezer como último recurso
+    const q = `artist:"${artist}" track:"${title}"`;
+    const res2 = await axios.get(
+      `https://api.deezer.com/search?q=${encodeURIComponent(q)}&limit=3`
+    );
+
+    if (res2.data.data && res2.data.data.length > 0) {
+      // Mesma lógica de validação para Deezer
+      const exactMatchDeezer = res2.data.data.find((track) => {
+        const foundArtist = normalize(track.artist.name);
+        const foundTitle = normalize(track.title);
+
+        const artistMatch =
+          foundArtist.includes(targetArtist) ||
+          targetArtist.includes(foundArtist);
+        const titleMatch =
+          foundTitle.includes(targetTitle) || targetTitle.includes(foundTitle);
+        const isBad =
+          !targetTitle.includes("cover") &&
+          badKeywords.some((bad) => foundTitle.includes(bad));
+
+        return artistMatch && titleMatch && !isBad && track.preview;
+      });
+
+      if (exactMatchDeezer) return exactMatchDeezer.preview;
+    }
+  } catch (e) {
+    console.log(`⚠️ Audio não encontrado para: ${title} - ${artist}`);
   }
-
-  // Fallback: Se não encontrou refrão
-  if (snippetLines.length < 4) {
-    const cleanText = cleanHtml(text);
-    const lines = cleanText
-      .split("\n")
-      .map((l) => l.trim())
-      .filter((l) => l.length > 10 && !l.startsWith("["));
-    if (lines.length < 5) return null;
-
-    const maxStart = Math.max(0, lines.length - 6);
-    const startIdx = Math.floor(Math.random() * maxStart);
-    snippetLines = lines.slice(startIdx, startIdx + 4);
-  }
-
-  // 3. Escolher a palavra a esconder
-  const targetLineIndex = 3;
-  const targetLine = snippetLines[targetLineIndex];
-  if (!targetLine) return null;
-
-  const words = targetLine.split(" ");
-  const candidates = words.filter(
-    (w) => w.replace(/[^a-zA-Z]/g, "").length > 3
-  );
-
-  if (candidates.length === 0) return null;
-
-  const missingWordRaw =
-    candidates[Math.floor(Math.random() * candidates.length)];
-  const missingWordClean = missingWordRaw.replace(/[^a-zA-Z0-9À-ÿ]/g, "");
-
-  const maskedLine = targetLine.replace(missingWordRaw, "_______");
-  snippetLines[targetLineIndex] = maskedLine;
-
-  return {
-    snippet: snippetLines.join("\n"),
-    missingWord: missingWordClean,
-  };
+  return null;
 }
 
-// --- BUSCAR LETRAS ---
+// --- LETRAS (Genius Lib + OVH) ---
 async function fetchLyricsData(title, artist) {
-  const cleanA = cleanStr(artist);
-
-  if (GENIUS_TOKEN) {
-    try {
-      const searchRes = await axios.get(
-        `https://api.genius.com/search?q=${encodeURIComponent(
-          artist + " " + title
-        )}`,
-        {
-          headers: { Authorization: `Bearer ${GENIUS_TOKEN}` },
-          timeout: 4000,
-        }
-      );
-      const hit =
-        searchRes.data.response.hits.find(
-          (h) =>
-            h.type === "song" &&
-            h.result.primary_artist.name
-              .toLowerCase()
-              .includes(cleanA.split(" ")[0])
-        ) || searchRes.data.response.hits[0];
-
-      if (hit) {
-        const page = await axios.get(hit.result.url);
-        const parts = page.data.match(
-          /<div data-lyrics-container="true"[^>]*>([\s\S]*?)<\/div>/g
-        );
-        if (parts) return parts.map((p) => p).join("\n");
-      }
-    } catch (e) {}
-  }
-  // Fallback OVH
+  // 1. Tenta Lyrics.ovh (Simples e rápido)
   try {
     const res = await axios.get(
       `https://api.lyrics.ovh/v1/${encodeURIComponent(
         artist
-      )}/${encodeURIComponent(cleanStr(title))}`,
+      )}/${encodeURIComponent(title)}`,
       { timeout: 3000 }
     );
-    return res.data.lyrics;
+    if (res.data.lyrics) return res.data.lyrics;
   } catch (e) {}
 
-  return null;
-}
-
-// --- PREVIEW AUDIO ---
-async function fetchPreview(title, artist) {
+  // 2. Tenta Genius-Lyrics Library (Scraper robusto)
   try {
-    const term = `${cleanStr(title)} ${cleanStr(artist)}`;
-    const res1 = await axios.get(
-      `https://itunes.apple.com/search?term=${encodeURIComponent(
-        term
-      )}&entity=song&limit=1`,
-      { timeout: 1500 }
-    );
-    if (res1.data.results?.[0]?.previewUrl)
-      return res1.data.results[0].previewUrl;
+    const searches = await genius.songs.search(`${title} ${artist}`);
+    if (searches.length > 0) {
+      const lyrics = await searches[0].lyrics();
+      return lyrics;
+    }
+  } catch (e) {
+    console.log(`⚠️ Letra não encontrada para: ${title}`);
+  }
 
-    const q = `artist:"${cleanStr(artist)}" track:"${cleanStr(title)}"`;
-    const res2 = await axios.get(
-      `https://api.deezer.com/search?q=${encodeURIComponent(q)}&limit=1`,
-      { timeout: 1500 }
-    );
-    if (res2.data.data?.[0]?.preview) return res2.data.data[0].preview;
-  } catch {}
   return null;
 }
 
-// --- ENDPOINT ---
+// --- PROCESSADOR DE LETRAS (Smart Sync Melhorado) ---
+function processLyricsForGame(fullLyrics) {
+  if (!fullLyrics) return null;
+
+  // 1. Limpeza Profunda
+  let text = fullLyrics
+    .replace(/\[.*?\]/g, "") // Remove [Chorus], [Verse 1], etc.
+    .replace(/\(.*?\)/g, "") // Remove (feat. X), (Remix)
+    .replace(/instrumental|guitar solo|repeat x\d/gi, "") // Remove instruções musicais
+    .split("\n")
+    .map((line) => line.trim()) // Remove espaços extras
+    .filter((l) => l.length > 15 && l.split(" ").length > 3) // Remove linhas muito curtas ou com poucas palavras
+    .join("\n");
+
+  const lines = text.split("\n");
+
+  // Exige pelo menos 8 linhas válidas para considerar a música jogável
+  if (lines.length < 8) return null;
+
+  // 2. Seleção Inteligente de Excerto
+  const maxStart = Math.max(0, lines.length - 8);
+  const startIdx =
+    Math.floor(Math.random() * (maxStart * 0.6)) +
+    Math.floor(lines.length * 0.2);
+
+  // Pega 4 linhas consecutivas
+  const snippetLines = lines.slice(startIdx, startIdx + 4);
+  if (snippetLines.length < 4) return null;
+
+  // 3. Escolher a palavra a esconder
+  const targetLineIndex = 3;
+  const targetLine = snippetLines[targetLineIndex];
+
+  // Palavras candidatas (mais de 3 letras)
+  const words = targetLine.split(" ").filter((w) => {
+    const clean = w.replace(/[^a-zA-ZÀ-ÿ]/g, "");
+    return clean.length > 3;
+  });
+
+  if (words.length === 0) return null;
+
+  // Escolhe a palavra alvo
+  const missingWordRaw = words[Math.floor(Math.random() * words.length)];
+  const missingWordClean = missingWordRaw.replace(/[^a-zA-Z0-9À-ÿ]/g, "");
+
+  // --- NOVO: GERAR DISTRATORES DA PRÓPRIA LETRA (Mesma Língua) ---
+  // Pega em todas as palavras das 4 linhas do excerto
+  const allContextWords = snippetLines
+    .join(" ")
+    .split(" ")
+    .map((w) => w.replace(/[^a-zA-Z0-9À-ÿ]/g, ""));
+
+  // Filtra para ter palavras únicas, grandes e diferentes da resposta
+  const distinctWords = [...new Set(allContextWords)].filter(
+    (w) => w.length > 3 && w.toLowerCase() !== missingWordClean.toLowerCase()
+  );
+
+  // Escolhe 3 palavras aleatórias do contexto
+  const distractors = distinctWords.sort(() => 0.5 - Math.random()).slice(0, 3);
+
+  // Se não houver suficientes, paciência (o frontend lida), mas garante pelo menos a resposta
+  const wordOptions = [missingWordClean, ...distractors].sort(
+    () => 0.5 - Math.random()
+  );
+
+  snippetLines[targetLineIndex] = targetLine.replace(missingWordRaw, "_______");
+
+  return {
+    snippet: snippetLines.join("\n"),
+    missingWord: missingWordClean,
+    wordOptions: wordOptions,
+  };
+}
+
+// --- SHUFFLE ARRAY (Fisher-Yates) ---
+function shuffleArray(array) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+  return array;
+}
+
+// --- ENDPOINT PRINCIPAL ---
 app.get("/api/game/generate", async (req, res) => {
   try {
     const { mode, query } = req.query;
     const token = await getSpotifyToken();
 
-    let searchTerm = query;
+    let searchTerm = query || "year:2023";
     if (mode === "ARTIST" || mode === "LYRICS") searchTerm = `artist:${query}`;
     else if (mode === "GENRE") searchTerm = `genre:${query}`;
-    else if (mode === "RANDOM") searchTerm = "year:2024";
 
-    console.log(`🎮 A gerar jogo: [${mode}] "${searchTerm}"`);
+    console.log(`🎮 Gerando jogo: [${mode}] "${searchTerm}"`);
 
+    // Busca 50 faixas para ter um bom "pool" de opções
     const spotifyRes = await axios.get("https://api.spotify.com/v1/search", {
-      params: { q: searchTerm, type: "track", limit: 40 },
+      params: { q: searchTerm, type: "track", limit: 50 },
       headers: { Authorization: `Bearer ${token}` },
     });
 
     let tracks = spotifyRes.data.tracks.items;
-    if (!tracks.length)
-      return res.status(404).json({ error: "No tracks found" });
 
-    tracks.sort((a, b) => b.popularity - a.popularity);
-    const candidates = tracks.slice(0, 15);
+    // Pool de Distratores: Todas as músicas encontradas na pesquisa (garante mesmo género/artista)
+    const distractorPool = tracks.map((t) => ({
+      id: t.id,
+      title: t.name,
+      artist: t.artists[0].name,
+    }));
+
+    // Embaralha para escolher as 5 perguntas
+    tracks = shuffleArray(tracks);
 
     const finalGameTracks = [];
-    const promises = candidates.map(async (t) => {
-      if (finalGameTracks.length >= 10) return;
+
+    // Processa em paralelo, mas com limite
+    for (const t of tracks) {
+      if (finalGameTracks.length >= 5) break;
 
       const artist = t.artists[0].name;
       const title = t.name;
 
+      // 1. Garante ÁUDIO
+      let preview = t.preview_url || (await fetchPreview(title, artist));
+      if (!preview) continue;
+
+      // 2. Gera Opções (Distratores) baseados na pesquisa original
+      // Escolhe 3 músicas da lista total que NÃO sejam a música atual
+      const distractors = distractorPool
+        .filter((d) => d.id !== t.id && d.title !== title) // Evita a própria música
+        .sort(() => 0.5 - Math.random()) // Embaralha
+        .slice(0, 3); // Pega 3
+
+      // Mistura a correta com as erradas
+      const options = [
+        { id: t.id, title: title, artist: artist },
+        ...distractors,
+      ].sort(() => 0.5 - Math.random());
+
       if (mode === "LYRICS") {
         const rawLyrics = await fetchLyricsData(title, artist);
         const gameData = processLyricsForGame(rawLyrics);
-        let preview = t.preview_url || (await fetchPreview(title, artist));
 
-        if (gameData && preview) {
+        if (gameData) {
           finalGameTracks.push({
             id: t.id,
-            title: t.name,
-            artist: t.artists.map((a) => a.name).join(", "),
+            title: title,
+            artist: artist,
             cover: t.album.images[0]?.url,
             gameMode: "LYRICS",
             lyricsSnippet: gameData.snippet,
             missingWord: gameData.missingWord,
+            wordOptions: gameData.wordOptions, // Opções de palavras (da mesma língua)
             previewUrl: preview,
+            options: options, // Opções de música (backup)
           });
         }
       } else {
-        let preview = t.preview_url || (await fetchPreview(title, artist));
-        if (preview) {
-          finalGameTracks.push({
-            id: t.id,
-            title: t.name,
-            artist: t.artists.map((a) => a.name).join(", "),
-            cover: t.album.images[0]?.url,
-            gameMode: mode,
-            previewUrl: preview,
-          });
-        }
+        finalGameTracks.push({
+          id: t.id,
+          title: title,
+          artist: artist,
+          cover: t.album.images[0]?.url,
+          gameMode: mode || "RANDOM",
+          previewUrl: preview,
+          options: options, // Opções da mesma pesquisa (mesmo género/artista)
+        });
       }
-    });
+    }
 
-    await Promise.all(promises);
+    if (finalGameTracks.length < 1) {
+      return res.status(404).json({
+        error:
+          "Não foi possível encontrar músicas com áudio/letras suficientes.",
+      });
+    }
+
     console.log(`✅ Jogo pronto com ${finalGameTracks.length} faixas.`);
     res.json(finalGameTracks);
   } catch (error) {
-    console.error("Erro:", error.message);
-    res.status(500).json({ error: "Server Error" });
+    console.error("Erro Fatal:", error.message);
+    res.status(500).json({ error: "Erro no servidor" });
   }
 });
 
 app.listen(PORT, () =>
-  console.log(`🚀 Servidor Final VerseVault na porta ${PORT}`)
+  console.log(`🚀 Servidor VerseVault rodando na porta ${PORT}`)
 );

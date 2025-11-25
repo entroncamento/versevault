@@ -5,20 +5,29 @@ const QuizGame = ({ tracks, mode, onFinish }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [score, setScore] = useState(0);
   const [timeLeft, setTimeLeft] = useState(30);
-  const [isPlaying, setIsPlaying] = useState(false);
   const [selectedOption, setSelectedOption] = useState(null);
   const [isAnswered, setIsAnswered] = useState(false);
   const [options, setOptions] = useState([]);
+
+  // NOVO: Estado para contornar autoplay policy
+  const [gameStarted, setGameStarted] = useState(false);
 
   const audioRef = useRef(null);
   const currentTrack = tracks[currentIndex];
   const isLyricsMode = mode === "LYRICS" || currentTrack?.gameMode === "LYRICS";
 
+  // Configura a ronda atual
   useEffect(() => {
     if (!currentTrack) return;
 
     if (isLyricsMode) {
-      setOptions(musicApi.generateWordOptions(currentTrack.missingWord));
+      // Passamos 'currentTrack.wordOptions' que vem do servidor (gerado da própria letra)
+      setOptions(
+        musicApi.generateWordOptions(
+          currentTrack.missingWord,
+          currentTrack.wordOptions
+        )
+      );
     } else {
       setOptions(musicApi.generateOptions(currentTrack, tracks));
     }
@@ -27,22 +36,22 @@ const QuizGame = ({ tracks, mode, onFinish }) => {
     setIsAnswered(false);
     setSelectedOption(null);
 
-    // Toca sempre se tiver preview
-    if (currentTrack.previewUrl) {
-      setIsPlaying(true);
-      setTimeout(() => {
-        if (audioRef.current) {
-          audioRef.current.volume = 0.5;
-          audioRef.current.play().catch(() => setIsPlaying(false));
-        }
-      }, 100);
-    } else {
-      setIsPlaying(false);
+    // Só toca se o jogo já tiver "começado" pelo utilizador
+    if (gameStarted && currentTrack.previewUrl) {
+      if (audioRef.current) {
+        audioRef.current.src = currentTrack.previewUrl;
+        audioRef.current.load(); // Força a limpeza do buffer de áudio anterior
+        audioRef.current.volume = 0.5;
+        audioRef.current
+          .play()
+          .catch((e) => console.log("Autoplay bloqueado:", e));
+      }
     }
-  }, [currentIndex, currentTrack, tracks, isLyricsMode]);
+  }, [currentIndex, currentTrack, gameStarted]);
 
+  // Timer
   useEffect(() => {
-    if (isAnswered || timeLeft <= 0) return;
+    if (!gameStarted || isAnswered || timeLeft <= 0) return;
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
@@ -53,7 +62,14 @@ const QuizGame = ({ tracks, mode, onFinish }) => {
       });
     }, 1000);
     return () => clearInterval(timer);
-  }, [timeLeft, isAnswered]);
+  }, [timeLeft, isAnswered, gameStarted]);
+
+  const handleStartGame = () => {
+    setGameStarted(true);
+    if (audioRef.current && currentTrack?.previewUrl) {
+      audioRef.current.play().catch(console.error);
+    }
+  };
 
   const handleTimeOut = () => {
     setIsAnswered(true);
@@ -90,6 +106,29 @@ const QuizGame = ({ tracks, mode, onFinish }) => {
 
   if (!currentTrack) return <div>A carregar...</div>;
 
+  // TELA INICIAL "PRONTO?" (Obrigatória para o áudio funcionar)
+  if (!gameStarted) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center bg-[#ECE9D8] text-[#003399]">
+        <div className="bg-white p-8 border-2 border-[#003C74] shadow-lg text-center rounded">
+          <h2 className="text-xl font-bold mb-4">Quiz Pronto!</h2>
+          <p className="mb-6 text-gray-600">
+            Encontrámos {tracks.length} perguntas.
+            <br />
+            Aumenta o volume.
+          </p>
+          <button
+            onClick={handleStartGame}
+            className="bg-[#0054E3] text-white px-6 py-2 rounded font-bold hover:bg-[#0042B3] shadow-md active:translate-y-1"
+          >
+            COMEÇAR JOGO ▶
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // JOGO NORMAL
   return (
     <div className="h-full flex flex-col bg-[#ECE9D8] p-2 select-none">
       <div className="flex justify-between items-center bg-black text-green-500 font-mono p-2 mb-2 rounded-sm shadow-inner">
@@ -107,38 +146,23 @@ const QuizGame = ({ tracks, mode, onFinish }) => {
       </div>
 
       <div className="flex-grow flex flex-col items-center justify-center bg-gray-900 border-2 border-gray-600 relative overflow-hidden mb-2 p-4 shadow-inner">
-        {currentTrack.previewUrl && (
-          <audio ref={audioRef} src={currentTrack.previewUrl} />
-        )}
+        <audio ref={audioRef} key={currentTrack.id} />
 
         {isLyricsMode ? (
           <div className="bg-[#FFFBE6] text-gray-800 p-6 rounded shadow-lg max-w-md w-full text-center border border-[#D4C495] relative">
-            {isPlaying && (
-              <div className="absolute top-2 right-2 text-xs text-[#003399] animate-pulse font-bold">
-                ♫ Playing
-              </div>
-            )}
-            <div className="absolute -top-3 left-1/2 w-4 h-4 rounded-full bg-red-500 shadow-md border border-red-700 transform -translate-x-1/2"></div>
             <h3 className="text-[#003399] font-bold text-xs uppercase tracking-widest mb-4 border-b border-gray-300 pb-2">
               Complete a Letra
             </h3>
             <p className="text-sm md:text-lg font-serif italic leading-relaxed font-medium whitespace-pre-line">
               "{currentTrack.lyricsSnippet}"
             </p>
-            <p className="mt-4 text-xs text-gray-500 font-sans">
-              Música de: {currentTrack.artist}
-            </p>
           </div>
         ) : (
           <div
-            className={`w-40 h-40 rounded-full border-8 border-[#111] flex items-center justify-center bg-[#222] shadow-2xl ${
-              isPlaying && !isAnswered ? "animate-spin" : ""
-            }`}
+            className="w-40 h-40 rounded-full border-8 border-[#111] flex items-center justify-center bg-[#222] shadow-2xl animate-spin"
             style={{ animationDuration: "4s" }}
           >
-            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-red-600 to-red-800 border-2 border-gray-600 flex items-center justify-center">
-              <div className="w-2 h-2 bg-black rounded-full"></div>
-            </div>
+            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-red-600 to-red-800 border-2 border-gray-600"></div>
           </div>
         )}
 
@@ -153,8 +177,8 @@ const QuizGame = ({ tracks, mode, onFinish }) => {
               <h3 className="text-lg font-bold">{currentTrack.title}</h3>
               <p className="text-sm text-gray-300">{currentTrack.artist}</p>
               {isLyricsMode && (
-                <p className="text-green-400 font-bold mt-2 text-sm">
-                  Palavra: {currentTrack.missingWord}
+                <p className="text-green-400 font-bold mt-2">
+                  Resposta: {currentTrack.missingWord}
                 </p>
               )}
             </div>
@@ -171,24 +195,21 @@ const QuizGame = ({ tracks, mode, onFinish }) => {
 
           if (isAnswered) {
             const corr = isLyricsMode
-              ? String(currentTrack.missingWord).toLowerCase()
+              ? currentTrack.missingWord.toLowerCase()
               : currentTrack.id;
             const curr = isLyricsMode ? String(val).toLowerCase() : val;
-
             if (curr === corr)
               btnClass = "bg-[#4CAF50] text-white border-[#2E7D32]";
             else if (val === selectedOption)
               btnClass = "bg-[#F44336] text-white border-[#C62828]";
             else btnClass = "opacity-40 grayscale";
-          } else {
-            btnClass += " hover:bg-[#FFFFCC] active:translate-y-[1px]";
           }
 
           return (
             <button
               key={idx}
               onClick={() => handleAnswer(val)}
-              className={`rounded-[3px] p-2 text-xs font-bold shadow-sm transition-all ${btnClass}`}
+              className={`rounded-[3px] p-2 text-xs font-bold shadow-sm ${btnClass}`}
               disabled={isAnswered}
             >
               {label}
