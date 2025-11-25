@@ -28,7 +28,6 @@ const QuizLobby = ({ onStartGame }) => {
 
       {/* Content */}
       <div className="flex-grow p-6 overflow-y-auto">
-        {/* CORREÇÃO AQUI: Troquei 'h-full' por 'min-h-full' */}
         <div className="bg-white border border-[#7F9DB9] p-4 rounded-sm min-h-full shadow-inner">
           <h2 className="text-sm font-bold text-gray-700 mb-4 border-b border-gray-300 pb-1">
             Select Mode
@@ -48,12 +47,7 @@ const QuizLobby = ({ onStartGame }) => {
             onClick={() => onStartGame("GENRE")}
           />
 
-          <ModeButton
-            title="Lyrics Challenge 📜"
-            desc="Guess the song by reading the lyrics!"
-            color="bg-pink-500"
-            onClick={() => onStartGame("LYRICS")}
-          />
+          {/* MODO LYRICS REMOVIDO DEVIDO A INSTABILIDADE */}
 
           <ModeButton
             title="I'm Feeling Lucky"

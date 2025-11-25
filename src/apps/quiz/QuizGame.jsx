@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { musicApi } from "../../services/musicApi";
+// Removemos useLyricsSync externo para usar lógica interna unificada
+import { motion, AnimatePresence } from "framer-motion";
 
 const QuizGame = ({ tracks, mode, onFinish }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -8,20 +10,79 @@ const QuizGame = ({ tracks, mode, onFinish }) => {
   const [selectedOption, setSelectedOption] = useState(null);
   const [isAnswered, setIsAnswered] = useState(false);
   const [options, setOptions] = useState([]);
-
-  // NOVO: Estado para contornar autoplay policy
   const [gameStarted, setGameStarted] = useState(false);
+
+  // Estado para controlar a linha ativa (Karaoke)
+  const [activeLineIndex, setActiveLineIndex] = useState(0);
 
   const audioRef = useRef(null);
   const currentTrack = tracks[currentIndex];
   const isLyricsMode = mode === "LYRICS" || currentTrack?.gameMode === "LYRICS";
 
-  // Configura a ronda atual
+  // --- LÓGICA DE SINCRONIZAÇÃO UNIFICADA ---
+  useEffect(() => {
+    if (!gameStarted || isAnswered || !isLyricsMode) return;
+
+    const audio = audioRef.current;
+    let lines = currentTrack.lyricsLines;
+
+    // SE NÃO HOUVER LINHAS VINDAS DO SERVIDOR (Fallback Genius)
+    // Criamos linhas artificiais aqui mesmo no frontend
+    if (!lines || lines.length === 0) {
+      if (currentTrack.lyricsSnippet) {
+        const rawLines = currentTrack.lyricsSnippet
+          .split("\n")
+          .filter((l) => l.trim().length > 0);
+        // 30 segundos de música / número de linhas = tempo por linha
+        const durationPerLine = 28 / Math.max(1, rawLines.length);
+
+        lines = rawLines.map((text, i) => ({
+          text,
+          time: i * durationPerLine,
+          isTarget: text.includes("_______"),
+        }));
+      } else {
+        return; // Sem letra nenhuma
+      }
+    }
+
+    const handleTimeUpdate = () => {
+      const currentTime = audio ? audio.currentTime : 0;
+
+      // Encontra a linha atual
+      let newIndex = 0;
+      for (let i = 0; i < lines.length; i++) {
+        if (currentTime >= lines[i].time) {
+          newIndex = i;
+        } else {
+          break;
+        }
+      }
+      setActiveLineIndex(newIndex);
+    };
+
+    if (audio) {
+      audio.addEventListener("timeupdate", handleTimeUpdate);
+    } else {
+      // Fallback se o áudio falhar: simula com timer
+      const interval = setInterval(() => {
+        setActiveLineIndex((prev) =>
+          prev < lines.length - 1 ? prev + 1 : prev
+        );
+      }, 30000 / lines.length);
+      return () => clearInterval(interval);
+    }
+
+    return () => {
+      if (audio) audio.removeEventListener("timeupdate", handleTimeUpdate);
+    };
+  }, [gameStarted, isAnswered, isLyricsMode, currentTrack]);
+
+  // Configuração Inicial da Ronda
   useEffect(() => {
     if (!currentTrack) return;
 
     if (isLyricsMode) {
-      // Passamos 'currentTrack.wordOptions' que vem do servidor (gerado da própria letra)
       setOptions(
         musicApi.generateWordOptions(
           currentTrack.missingWord,
@@ -35,21 +96,19 @@ const QuizGame = ({ tracks, mode, onFinish }) => {
     setTimeLeft(30);
     setIsAnswered(false);
     setSelectedOption(null);
+    setActiveLineIndex(0);
 
-    // Só toca se o jogo já tiver "começado" pelo utilizador
     if (gameStarted && currentTrack.previewUrl) {
       if (audioRef.current) {
         audioRef.current.src = currentTrack.previewUrl;
-        audioRef.current.load(); // Força a limpeza do buffer de áudio anterior
+        audioRef.current.load();
         audioRef.current.volume = 0.5;
-        audioRef.current
-          .play()
-          .catch((e) => console.log("Autoplay bloqueado:", e));
+        audioRef.current.play().catch((e) => console.log("Autoplay:", e));
       }
     }
   }, [currentIndex, currentTrack, gameStarted]);
 
-  // Timer
+  // Timer Geral
   useEffect(() => {
     if (!gameStarted || isAnswered || timeLeft <= 0) return;
     const timer = setInterval(() => {
@@ -66,9 +125,6 @@ const QuizGame = ({ tracks, mode, onFinish }) => {
 
   const handleStartGame = () => {
     setGameStarted(true);
-    if (audioRef.current && currentTrack?.previewUrl) {
-      audioRef.current.play().catch(console.error);
-    }
   };
 
   const handleTimeOut = () => {
@@ -104,31 +160,45 @@ const QuizGame = ({ tracks, mode, onFinish }) => {
     }
   };
 
+  // --- RENDERIZADORES ---
+
+  // Determina quais linhas mostrar (Server lines ou Local fallback)
+  const getDisplayLines = () => {
+    if (currentTrack?.lyricsLines && currentTrack.lyricsLines.length > 0) {
+      return currentTrack.lyricsLines;
+    }
+    if (currentTrack?.lyricsSnippet) {
+      // Converte snippet bruto em linhas para visualização uniforme
+      return currentTrack.lyricsSnippet
+        .split("\n")
+        .map((text) => ({ text, time: 0 }));
+    }
+    return [];
+  };
+
+  const displayLines = getDisplayLines();
+
   if (!currentTrack) return <div>A carregar...</div>;
 
-  // TELA INICIAL "PRONTO?" (Obrigatória para o áudio funcionar)
   if (!gameStarted) {
     return (
       <div className="h-full flex flex-col items-center justify-center bg-[#ECE9D8] text-[#003399]">
         <div className="bg-white p-8 border-2 border-[#003C74] shadow-lg text-center rounded">
           <h2 className="text-xl font-bold mb-4">Quiz Pronto!</h2>
           <p className="mb-6 text-gray-600">
-            Encontrámos {tracks.length} perguntas.
-            <br />
-            Aumenta o volume.
+            Encontrámos {tracks.length} músicas.
           </p>
           <button
             onClick={handleStartGame}
-            className="bg-[#0054E3] text-white px-6 py-2 rounded font-bold hover:bg-[#0042B3] shadow-md active:translate-y-1"
+            className="bg-[#0054E3] text-white px-6 py-2 rounded font-bold shadow-md active:translate-y-1"
           >
-            COMEÇAR JOGO ▶
+            COMEÇAR ▶
           </button>
         </div>
       </div>
     );
   }
 
-  // JOGO NORMAL
   return (
     <div className="h-full flex flex-col bg-[#ECE9D8] p-2 select-none">
       <div className="flex justify-between items-center bg-black text-green-500 font-mono p-2 mb-2 rounded-sm shadow-inner">
@@ -149,25 +219,53 @@ const QuizGame = ({ tracks, mode, onFinish }) => {
         <audio ref={audioRef} key={currentTrack.id} />
 
         {isLyricsMode ? (
-          <div className="bg-[#FFFBE6] text-gray-800 p-6 rounded shadow-lg max-w-md w-full text-center border border-[#D4C495] relative">
-            <h3 className="text-[#003399] font-bold text-xs uppercase tracking-widest mb-4 border-b border-gray-300 pb-2">
-              Complete a Letra
-            </h3>
-            <p className="text-sm md:text-lg font-serif italic leading-relaxed font-medium whitespace-pre-line">
-              "{currentTrack.lyricsSnippet}"
-            </p>
+          <div className="bg-[#1A1A1A] text-white p-6 rounded shadow-lg max-w-md w-full text-center border border-gray-700 relative overflow-hidden h-[280px] flex flex-col justify-center">
+            {/* VISUALIZADOR DE KARAOKE */}
+            <div className="flex flex-col gap-4 h-full justify-center items-center">
+              <AnimatePresence mode="popLayout">
+                {displayLines.map((line, idx) => {
+                  // Lógica de foco: Mostra linha atual e as vizinhas
+                  const isActive = idx === activeLineIndex;
+                  const dist = Math.abs(idx - activeLineIndex);
+
+                  if (dist > 2) return null; // Otimização: esconde linhas distantes
+
+                  return (
+                    <motion.p
+                      key={`${currentTrack.id}-${idx}`}
+                      layout
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{
+                        opacity: isActive ? 1 : 0.4,
+                        scale: isActive ? 1.1 : 0.95,
+                        color: isActive ? "#FFFFFF" : "#888888",
+                        fontWeight: isActive ? 700 : 400,
+                        filter: isActive ? "blur(0px)" : "blur(1px)",
+                      }}
+                      exit={{ opacity: 0, y: -20 }}
+                      transition={{ duration: 0.5 }}
+                      className="text-lg font-sans leading-relaxed max-w-[90%]"
+                    >
+                      {line.text}
+                    </motion.p>
+                  );
+                })}
+              </AnimatePresence>
+            </div>
           </div>
         ) : (
           <div
             className="w-40 h-40 rounded-full border-8 border-[#111] flex items-center justify-center bg-[#222] shadow-2xl animate-spin"
             style={{ animationDuration: "4s" }}
           >
-            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-red-600 to-red-800 border-2 border-gray-600"></div>
+            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-red-600 to-red-800 border-2 border-gray-600 relative">
+              <div className="absolute top-3 left-4 w-3 h-3 bg-white/20 rounded-full"></div>
+            </div>
           </div>
         )}
 
         {isAnswered && (
-          <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center animate-fadeIn z-30">
+          <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center animate-fadeIn z-30 backdrop-blur-sm">
             <img
               src={currentTrack.cover}
               alt="Capa"
@@ -177,8 +275,8 @@ const QuizGame = ({ tracks, mode, onFinish }) => {
               <h3 className="text-lg font-bold">{currentTrack.title}</h3>
               <p className="text-sm text-gray-300">{currentTrack.artist}</p>
               {isLyricsMode && (
-                <p className="text-green-400 font-bold mt-2">
-                  Resposta: {currentTrack.missingWord}
+                <p className="text-green-400 font-bold mt-2 bg-black/50 px-2 rounded">
+                  {currentTrack.missingWord.toUpperCase()}
                 </p>
               )}
             </div>
@@ -199,17 +297,17 @@ const QuizGame = ({ tracks, mode, onFinish }) => {
               : currentTrack.id;
             const curr = isLyricsMode ? String(val).toLowerCase() : val;
             if (curr === corr)
-              btnClass = "bg-[#4CAF50] text-white border-[#2E7D32]";
+              btnClass = "bg-[#4CAF50] text-white border-[#2E7D32] font-bold";
             else if (val === selectedOption)
-              btnClass = "bg-[#F44336] text-white border-[#C62828]";
-            else btnClass = "opacity-40 grayscale";
+              btnClass = "bg-[#F44336] text-white border-[#C62828] opacity-80";
+            else btnClass = "opacity-30 grayscale";
           }
 
           return (
             <button
               key={idx}
               onClick={() => handleAnswer(val)}
-              className={`rounded-[3px] p-2 text-xs font-bold shadow-sm ${btnClass}`}
+              className={`rounded-[3px] p-2 text-xs font-bold shadow-sm transition-all active:scale-[0.95] ${btnClass}`}
               disabled={isAnswered}
             >
               {label}
