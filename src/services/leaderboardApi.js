@@ -12,6 +12,8 @@ import {
   getDocs,
   increment,
   serverTimestamp,
+  arrayUnion,
+  arrayRemove,
 } from "firebase/firestore";
 import { app } from "../firebase";
 
@@ -55,7 +57,34 @@ export const leaderboardApi = {
     }
   },
 
-  // NOVO: Adiciona uma vitória no Daily Drop
+  async toggleLike(user, track, isLiked) {
+    if (!user) return;
+    const userRef = doc(db, "leaderboard", user.uid);
+
+    // ATUALIZAÇÃO: Agora guardamos URL e Capa para poder tocar a partir da lista de likes
+    const trackData = {
+      title: track.title,
+      artist: track.artist,
+      url: track.url || "",
+      cover: track.cover || "",
+      id: track.id || "",
+    };
+
+    try {
+      await setDoc(
+        userRef,
+        {
+          likedTracks: isLiked ? arrayUnion(trackData) : arrayRemove(trackData),
+        },
+        { merge: true }
+      );
+      return true;
+    } catch (error) {
+      console.error("Erro toggle like:", error);
+      return false;
+    }
+  },
+
   async recordDailyDropWin(user) {
     if (!user) return;
     const userRef = doc(db, "leaderboard", user.uid);
@@ -66,7 +95,7 @@ export const leaderboardApi = {
         {
           username: user.displayName || user.email.split("@")[0],
           photoURL: user.photoURL || "/icons/Minesweeper.ico",
-          dailyDropsCompleted: increment(1), // Novo campo para Daily Drop
+          dailyDropsCompleted: increment(1),
         },
         { merge: true }
       );
@@ -102,22 +131,17 @@ export const leaderboardApi = {
     }
   },
 
-  // --- NOVO: Calcular Rank Específico (Artista ou Género) ---
   async getStatRank(category, itemName, userCount) {
     if (!itemName || !userCount) return null;
     try {
-      // Recria a chave segura (ex: "Dr. Dre" -> "Dr Dre") para buscar na BD
       const safeKey = itemName.replace(/\./g, "");
       const fieldPath = `stats.${category}.${safeKey}`;
-
-      // Conta quantos utilizadores têm um valor MAIOR que o teu nesse campo
       const q = query(
         collection(db, "leaderboard"),
         where(fieldPath, ">", userCount)
       );
-
       const snapshot = await getCountFromServer(q);
-      return snapshot.data().count + 1; // Se 0 pessoas têm mais, tu és o #1
+      return snapshot.data().count + 1;
     } catch (error) {
       console.error("Erro rank stat:", error);
       return null;
@@ -125,8 +149,6 @@ export const leaderboardApi = {
   },
 
   async getTopPlayers() {
-    // (Código igual ao anterior para poupar espaço, mantém o que tinhas)
-    const CACHE_KEY = "leaderboard_cache_v1";
     try {
       const q = query(
         collection(db, "leaderboard"),

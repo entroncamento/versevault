@@ -1,12 +1,19 @@
 import React from "react";
 
 const QuizResults = ({ score, tracks, onRetry, onExit }) => {
-  // Rank logic based on score - Gen Z Edition
+  // Lógica de Rank baseada em 5 perguntas (Max Score possível = 2000)
   const getRank = (s) => {
-    if (s > 4000)
+    // Se acertares tudo muito rápido (avg > 320pts por música)
+    if (s >= 1600)
       return { title: "CEO of Aux Cord 👑", color: "text-[#FFD700]" }; // Gold
-    if (s > 3000) return { title: "Vibe Curator ✨", color: "text-[#C0C0C0]" }; // Silver
-    if (s > 1500) return { title: "Kinda Mid NGL 😐", color: "text-[#CD7F32]" }; // Bronze
+
+    // Se acertares a maioria bem (avg > 200pts por música)
+    if (s >= 1000) return { title: "Vibe Curator ✨", color: "text-[#C0C0C0]" }; // Silver
+
+    // Se acertares pelo menos uma ou duas
+    if (s > 400) return { title: "Kinda Mid NGL 😐", color: "text-[#CD7F32]" }; // Bronze
+
+    // Se falhares quase tudo
     return { title: "In Your Flop Era 💀", color: "text-gray-500" };
   };
 

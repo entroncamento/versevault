@@ -37,7 +37,7 @@ const appRegistry = {
   },
   MEDIA_PLAYER: {
     component: MediaPlayerApp,
-    title: "Windows Media Player",
+    title: "VerseVault Media Player",
     icon: "/icons/wmpIcon.png", // Vê a nota sobre o ícone abaixo
   },
 };
