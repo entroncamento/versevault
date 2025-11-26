@@ -188,7 +188,10 @@ const MyComputer = ({ windowId }) => {
                 </p>
                 <div className="flex flex-col items-start pl-2">
                   <div className="flex items-center gap-2 mb-1">
-                    <img src="/icons/cd_audio_cd_a-0.png" className="w-4 h-4" />
+                    <img
+                      src="https://win98icons.alexmeub.com/icons/png/cd_audio_cd_a-0.png"
+                      className="w-4 h-4"
+                    />
                     <span className="text-sm font-bold text-[#444] truncate">
                       {topArtistData ? topArtistData.name : "None yet"}
                     </span>
@@ -208,7 +211,10 @@ const MyComputer = ({ windowId }) => {
                 <p className="text-[#808080] font-bold mb-1">Primary Genre</p>
                 <div className="flex flex-col items-start pl-2">
                   <div className="flex items-center gap-2 mb-1">
-                    <img src="/icons/world-0.png" className="w-4 h-4" />
+                    <img
+                      src="https://win98icons.alexmeub.com/icons/png/entire_network_globe-0.png"
+                      className="w-4 h-4"
+                    />
                     <span className="text-sm font-bold text-[#444] truncate">
                       {topGenreData ? topGenreData.name : "None yet"}
                     </span>
