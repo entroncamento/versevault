@@ -6,6 +6,16 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
+      // Novas rotas do jogo e da AI
+      "/api/game": {
+        target: "http://localhost:3001",
+        changeOrigin: true,
+      },
+      "/api/ai": {
+        target: "http://localhost:3001",
+        changeOrigin: true,
+      },
+      // Rotas antigas
       "/api/itunes": {
         target: "https://itunes.apple.com",
         changeOrigin: true,

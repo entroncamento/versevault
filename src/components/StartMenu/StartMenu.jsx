@@ -37,7 +37,7 @@ const LeftMenuItem = ({ icon, title, subtitle, isBold = false, onClick }) => (
 );
 
 // --- ITEM DA DIREITA (Fundo Azul) ---
-const RightMenuItem = ({ icon, title, isBold = false, onClick }) => (
+const RightMenuItem = ({ icon, title, subtitle, isBold = false, onClick }) => (
   <div
     className="group flex items-center px-3 py-1 hover:bg-xp-start-hover hover:text-white cursor-default mb-1"
     onClick={onClick}
@@ -49,13 +49,21 @@ const RightMenuItem = ({ icon, title, isBold = false, onClick }) => (
         <div className="w-full h-full bg-blue-200 border border-blue-400 rounded-sm" />
       )}
     </div>
-    <span
-      className={`text-xs text-[#00138c] group-hover:text-white leading-none ${
-        isBold ? "font-bold" : ""
-      }`}
-    >
-      {title}
-    </span>
+    {/* Adicionei um div para empilhar título e subtítulo */}
+    <div className="flex flex-col overflow-hidden">
+      <span
+        className={`text-xs text-[#00138c] group-hover:text-white leading-none ${
+          isBold ? "font-bold" : ""
+        }`}
+      >
+        {title}
+      </span>
+      {subtitle && (
+        <span className="text-[10px] text-[#00138c] opacity-80 group-hover:text-gray-200 group-hover:opacity-100 truncate mt-[1px]">
+          {subtitle}
+        </span>
+      )}
+    </div>
   </div>
 );
 
@@ -115,30 +123,41 @@ const StartMenu = ({ onClose }) => {
         <div className="flex flex-1 bg-white">
           {/* ESQUERDA (Apps Pinned) */}
           <div className="flex-[5] bg-xp-start-bodyLeft flex flex-col py-2 border-r border-xp-start-bodyRight">
-            {/* ATALHO NOVO: Daily Drop Challenge */}
-
             <LeftMenuItem
               title="My Computer"
+              subtitle="System overview"
               icon="/icons/MyComputer.ico"
               onClick={() => handleOpenApp("MY_COMPUTER")}
             />
 
             <LeftMenuItem
               title="VerseVault Quiz"
+              subtitle="Test your music knowledge"
               icon="/icons/Minesweeper.ico"
               onClick={() => handleOpenApp("QUIZ")}
             />
 
             <LeftMenuItem
               title="Leaderboard"
+              subtitle="See top players"
               icon="/icons/notepad.png"
               onClick={() => handleOpenApp("LEADERBOARD")}
             />
+
             <LeftMenuItem
               title="Daily Drop"
+              subtitle="New challenge everyday"
               icon="/icons/search.png"
               onClick={() => handleOpenApp("DAILY_DROP")}
             />
+
+            <LeftMenuItem
+              title="Windows Media Player"
+              subtitle="Play music and videos"
+              icon="/icons/wmpIcon.png"
+              onClick={() => handleOpenApp("MEDIA_PLAYER")}
+            />
+
             <div className="flex-grow" />
           </div>
 
@@ -146,6 +165,7 @@ const StartMenu = ({ onClose }) => {
           <div className="flex-[4] bg-xp-start-bodyRight py-2 px-1">
             <RightMenuItem
               title="Edit Profile"
+              subtitle="Change avatar & name"
               isBold
               icon="/icons/notepad.png"
               onClick={() => handleOpenApp("USER_ACCOUNTS")}

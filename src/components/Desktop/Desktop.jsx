@@ -9,6 +9,7 @@ import computerIcon from "/icons/MyComputer.ico";
 import quizIcon from "/icons/Minesweeper.ico";
 import leaderboardIcon from "/icons/notepad.png";
 import dailyDropIcon from "/icons/search.png"; // Novo ícone
+import wmpIconUrl from "/icons/wmpIcon.png"; // Novo ícone
 
 const Desktop = () => {
   const { windows, openWindow } = useWindowManager();
@@ -47,6 +48,13 @@ const Desktop = () => {
       icon: dailyDropIcon,
       action: "DAILY_DROP",
       position: { x: 20, y: 290 },
+    },
+    {
+      id: "mediaplayer",
+      label: "Media Player",
+      icon: wmpIconUrl, // Usa a variável criada acima
+      action: "MEDIA_PLAYER",
+      position: { x: 20, y: 380 },
     },
   ]);
 

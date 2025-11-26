@@ -6,6 +6,7 @@ import MyComputer from "../apps/MyComputer.jsx";
 import LeaderboardApp from "../apps/LeaderboardApp.jsx";
 import UserAccountsApp from "../apps/UserAccountsApp.jsx";
 import DailyDropApp from "../apps/DailyDropApp.jsx";
+import MediaPlayerApp from "../apps/MediaPlayerApp.jsx";
 
 const appRegistry = {
   QUIZ: {
@@ -33,6 +34,11 @@ const appRegistry = {
     component: DailyDropApp,
     title: "Daily Drop Challenge",
     icon: "/icons/search.png",
+  },
+  MEDIA_PLAYER: {
+    component: MediaPlayerApp,
+    title: "Windows Media Player",
+    icon: "/icons/wmpIcon.png", // Vê a nota sobre o ícone abaixo
   },
 };
 

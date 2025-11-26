@@ -2,15 +2,32 @@ import express from "express";
 import cors from "cors";
 import axios from "axios";
 import "dotenv/config";
+import Groq from "groq-sdk";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// --- CONFIGURAÇÃO ---
+// --- LOGS DE ARRANQUE ---
+const groqKey = process.env.GROQ_API_KEY;
+
+console.log("------------------------------------------------");
+console.log("🚀 Iniciando VerseVault Server...");
+console.log(
+  `🧠 Groq Key: ${
+    groqKey && groqKey.length > 10 ? "✅ Detetada" : "❌ Em falta"
+  }`
+);
+console.log("------------------------------------------------");
+
+// --- CONFIGURAÇÃO SPOTIFY ---
 const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID;
 const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
 
+// Inicializa Groq com chave ou fallback para evitar crash no boot
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY || "no-key" });
+
 app.use(cors({ origin: "*" }));
+app.use(express.json());
 
 // --- TOKEN MANAGER SPOTIFY ---
 let spotifyToken = null;
@@ -43,14 +60,11 @@ const getSpotifyToken = async () => {
     return spotifyToken;
   } catch (e) {
     console.error("❌ Erro Spotify Auth:", e.message);
-    if (e.response) {
-      console.error("Detalhes:", e.response.data);
-    }
     throw new Error("Falha na autenticação Spotify");
   }
 };
 
-// --- PREVIEW AUDIO (iTunes/Deezer Fallback) ---
+// --- FUNÇÃO PREVIEW AUDIO ---
 async function fetchPreview(title, artist) {
   const normalize = (str) =>
     str
@@ -88,13 +102,12 @@ async function fetchPreview(title, artist) {
       `https://api.deezer.com/search?q=${encodeURIComponent(q)}&limit=1`
     );
     if (res2.data.data?.[0]?.preview) return res2.data.data[0].preview;
-  } catch (e) {
-    console.log(`⚠️ Audio não encontrado para: ${title}`);
-  }
+  } catch (e) {}
+
   return null;
 }
 
-// --- SHUFFLE ---
+// --- SHUFFLE ARRAY ---
 function shuffleArray(array) {
   for (let i = array.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -103,7 +116,7 @@ function shuffleArray(array) {
   return array;
 }
 
-// --- WIKIPEDIA HELPER ---
+// --- WIKIPEDIA FACTS ---
 async function getWikiFact(artistName) {
   try {
     const res = await axios.get(
@@ -123,124 +136,226 @@ async function getWikiFact(artistName) {
   return "An iconic music figure.";
 }
 
+// --- NORMALIZAÇÃO PARA COMPARAÇÃO ---
+function normalize(str) {
+  return str
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9 ]/g, "")
+    .trim();
+}
+
 // =========================================================
-//                  ENDPOINT DAILY DROP
+//                  ENDPOINT AI DJ (GROQ)
 // =========================================================
+app.post("/api/ai/recommend", async (req, res) => {
+  try {
+    const { vibe } = req.body;
+    console.log(`🤖 AI DJ a processar vibe: "${vibe}"`);
+
+    const token = await getSpotifyToken();
+    let suggestion = { artist: "Unknown", title: "Unknown" };
+
+    try {
+      const completion = await groq.chat.completions.create({
+        // MODELO ATUALIZADO E ESTÁVEL
+        model: "llama-3.3-70b-versatile",
+        messages: [
+          {
+            role: "system",
+            content: `You are a music expert DJ. 
+            Your goal is to suggest the PERFECT song for the user's vibe.
+            
+            RULES:
+            1. Output ONLY valid JSON: { "artist": "Exact Name", "title": "Exact Title" }
+            2. If the user mentions a specific artist, YOU MUST pick a song by that artist.
+            
+            GENRE RULES (CRITICAL):
+            3. "Brazilian Trap": Suggest Matuê, Teto, Wiu, KayBlack, Veigh, Derek, Ryu, The Runner. Do NOT suggest Anitta, Ludmilla or Funk artists.
+            4. "Portuguese (PT) Trap/Hip-Hop": Suggest Wet Bed Gang, Dillaz, ProfJam, T-Rex, Piruka, Lon3r Johny. Do NOT suggest Blaya, David Carreira or Pop.
+            5. "Funk": Only suggest Funk if explicitly asked.
+            6. Ensure artist names are spelled correctly (e.g., "Blaya" not "Blay", "Matuê" not "Matue").
+            
+            7. If the vibe is vague, pick a popular hit fitting the description.`,
+          },
+          {
+            role: "user",
+            content: vibe,
+          },
+        ],
+        temperature: 0.4, // Mais baixo para reduzir alucinações (nomes errados)
+      });
+
+      const text = completion.choices[0]?.message?.content || "{}";
+      // Limpeza básica para garantir que é JSON puro
+      const jsonStart = text.indexOf("{");
+      const jsonEnd = text.lastIndexOf("}");
+
+      if (jsonStart !== -1 && jsonEnd !== -1) {
+        const clean = text.substring(jsonStart, jsonEnd + 1);
+        suggestion = JSON.parse(clean);
+      } else {
+        throw new Error("Resposta não contém JSON válido");
+      }
+
+      console.log(
+        `🧠 (Groq) Sugeriu: ${suggestion.artist} - ${suggestion.title}`
+      );
+    } catch (err) {
+      console.warn("⚠️ Groq falhou. Usando fallback.");
+      if (err.error) console.error("Groq API Error:", err.error);
+      else console.error(err);
+
+      // Fallback hardcoded melhorado
+      const v = vibe.toLowerCase();
+      if (v.includes("sad"))
+        suggestion = { artist: "Adele", title: "Someone Like You" };
+      else if (v.includes("party"))
+        suggestion = { artist: "Dua Lipa", title: "Levitating" };
+      else if (v.includes("trap") && v.includes("portug"))
+        suggestion = { artist: "Dillaz", title: "Mo Boy" };
+      else if (v.includes("trap") || v.includes("matue"))
+        suggestion = { artist: "Matuê", title: "Kenny G" };
+      else
+        suggestion = {
+          artist: "Rick Astley",
+          title: "Never Gonna Give You Up",
+        };
+    }
+
+    // --- PESQUISA ROBUSTA NO SPOTIFY ---
+
+    // 1. Tentativa Específica (Strict)
+    let searchQ = `track:${suggestion.title} artist:${suggestion.artist}`;
+
+    let spotifyRes = await axios.get("https://api.spotify.com/v1/search", {
+      params: {
+        q: searchQ,
+        type: "track",
+        limit: 10,
+      },
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    let items = spotifyRes.data.tracks.items;
+
+    // 2. Tentativa Genérica (Loose) - Se a estrita falhar
+    if (items.length === 0) {
+      console.log("⚠️ Busca estrita falhou. Tentando busca genérica...");
+      searchQ = `${suggestion.title} ${suggestion.artist}`;
+
+      spotifyRes = await axios.get("https://api.spotify.com/v1/search", {
+        params: {
+          q: searchQ,
+          type: "track",
+          limit: 10,
+        },
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      items = spotifyRes.data.tracks.items;
+    }
+
+    // 3. Filtragem Inteligente
+    let track = items.find(
+      (t) =>
+        normalize(t.name).includes(normalize(suggestion.title)) &&
+        normalize(t.artists[0].name).includes(normalize(suggestion.artist))
+    );
+
+    // Se a busca genérica der resultados mas o filtro falhar (ex: grafia diferente), aceita o primeiro
+    if (!track && items.length > 0) {
+      track = items[0];
+    }
+
+    if (!track) {
+      return res
+        .status(404)
+        .json({ error: "Música não encontrada no Spotify" });
+    }
+
+    // preview
+    let previewUrl = track.preview_url;
+    if (!previewUrl) {
+      previewUrl = await fetchPreview(track.name, track.artists[0].name);
+    }
+
+    res.json({
+      id: track.id,
+      title: track.name,
+      artist: track.artists[0].name,
+      url: previewUrl,
+      cover: track.album.images[0]?.url,
+      album: track.album.name,
+    });
+  } catch (error) {
+    console.error("❌ Erro Geral no AI DJ:", error.message);
+    res.status(500).json({ error: "Erro interno do servidor" });
+  }
+});
+
+// =========================================================
+//                  ENDPOINTS DE JOGO (IGUAIS)
+// =========================================================
+
 app.get("/api/game/daily", async (req, res) => {
   try {
     const token = await getSpotifyToken();
-
-    // 1. Gerar Seed baseada no Dia (Data Atual)
     const daySeed = Math.floor(Date.now() / 86400000);
-
-    // 2. Escolher um Offset "Aleatório" mas Determinístico
     const offset = (daySeed * 97) % 500;
-
     let artist = null;
 
-    // --- TENTATIVA 1: Pesquisa Determinística (Daily) ---
     try {
-      const spotifyResDaily = await axios.get(
-        "https://api.spotify.com/v1/search",
-        {
-          params: {
-            q: "genre:pop OR genre:rock OR genre:hip-hop OR genre:electronic",
-            type: "artist",
-            limit: 10,
-            offset: offset,
-          },
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-      artist = spotifyResDaily.data.artists.items[0];
-    } catch (e) {
-      console.error(`❌ ERRO TENTATIVA 1: ${e.message}`);
-    }
+      const r = await axios.get("https://api.spotify.com/v1/search", {
+        params: {
+          q: "genre:pop OR genre:rock",
+          type: "artist",
+          limit: 10,
+          offset,
+        },
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      artist = r.data.artists.items[0];
+    } catch (e) {}
 
-    // --- TENTATIVA 2: FALLBACK (Se a pesquisa diária falhar) ---
     if (!artist) {
-      console.warn(
-        "⚠️ FALLBACK: Pesquisa diária falhou. Usando fallback de artista genérico."
-      );
-      try {
-        // CORREÇÃO FINAL: Busca por uma única letra ("q: 'a'"), o que garante resultados quase 100% do tempo.
-        const spotifyResFallback = await axios.get(
-          "https://api.spotify.com/v1/search",
-          {
-            params: {
-              q: "a", // A busca mais segura para garantir que o Spotify devolva algo
-              type: "artist",
-              limit: 1, // Basta um resultado
-              offset: 0,
-            },
-            headers: { Authorization: `Bearer ${token}` },
-          }
-        );
-
-        artist = spotifyResFallback.data.artists.items[0];
-
-        // Se falhar mesmo no fallback, o array é nulo.
-        if (!artist)
-          console.error(
-            "❌ FALLBACK CRÍTICO: O array de artistas do fallback veio vazio."
-          );
-      } catch (e) {
-        console.error(
-          "❌ FALLBACK CRÍTICO: O fallback também falhou (erro de rede/token)."
-        );
-      }
+      const r = await axios.get("https://api.spotify.com/v1/search", {
+        params: { q: "a", type: "artist", limit: 1, offset: 0 },
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      artist = r.data.artists.items[0];
     }
 
-    // Se *nenhuma* das tentativas encontrou um artista, é um erro real.
-    if (!artist)
-      return res
-        .status(404)
-        .json({ error: "Daily artist not found after fallback" });
-
-    // 4. Buscar Top Track para Dica
     const topTracksRes = await axios.get(
       `https://api.spotify.com/v1/artists/${artist.id}/top-tracks?market=US`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
     const topTrack = topTracksRes.data.tracks[0]?.name || "Unknown Hit";
-
-    // 5. Buscar Facto Wiki
     const fact = await getWikiFact(artist.name);
 
-    // 6. Construir Resposta do Jogo
-    const gameData = {
+    res.json({
       dayId: daySeed,
       name: artist.name,
       image: artist.images[0]?.url,
       hints: [
-        `Genre: ${artist.genres.slice(0, 2).join(", ") || "Pop"}`,
-        `Popularity Score: ${artist.popularity}/100`,
-        `Biggest Hit: "${topTrack}"`,
+        `Genre: ${artist.genres.slice(0, 2).join(", ")}`,
+        `Popularity: ${artist.popularity}`,
+        `Hit: "${topTrack}"`,
         `Fact: ${fact}`,
       ],
-    };
-
-    res.json(gameData);
+    });
   } catch (error) {
-    console.error("Daily Error:", error.message);
-    // Erro 500 para falha de servidor não antecipada (ex: token inválido)
     res.status(500).json({ error: "Server Error" });
   }
 });
 
-// =========================================================
-//                  ENDPOINT QUIZ PRINCIPAL
-// =========================================================
 app.get("/api/game/generate", async (req, res) => {
   try {
     const { mode, query } = req.query;
     const token = await getSpotifyToken();
-
     let searchTerm = query || "year:2024";
     if (mode === "ARTIST") searchTerm = `artist:${query}`;
     else if (mode === "GENRE") searchTerm = `genre:${query}`;
-
-    console.log(`🎮 Gerando: [${mode}] "${searchTerm}"`);
 
     const spotifyRes = await axios.get("https://api.spotify.com/v1/search", {
       params: { q: searchTerm, type: "track", limit: 50 },
@@ -249,7 +364,6 @@ app.get("/api/game/generate", async (req, res) => {
 
     let tracks = shuffleArray(spotifyRes.data.tracks.items);
     const finalGameTracks = [];
-
     const distractorPool = tracks.map((t) => ({
       id: t.id,
       title: t.name,
@@ -258,46 +372,32 @@ app.get("/api/game/generate", async (req, res) => {
 
     for (const t of tracks) {
       if (finalGameTracks.length >= 5) break;
-
-      const artist = t.artists[0].name;
-      const title = t.name;
-
-      let preview = t.preview_url || (await fetchPreview(title, artist));
+      let preview =
+        t.preview_url || (await fetchPreview(t.name, t.artists[0].name));
       if (!preview) continue;
 
       const distractors = distractorPool
-        .filter((d) => d.id !== t.id && d.title !== title)
+        .filter((d) => d.id !== t.id && d.title !== t.name)
         .sort(() => 0.5 - Math.random())
         .slice(0, 3);
 
-      const options = [
-        { id: t.id, title: title, artist: artist },
-        ...distractors,
-      ].sort(() => 0.5 - Math.random());
-
       finalGameTracks.push({
         id: t.id,
-        title: title,
-        artist: artist,
+        title: t.name,
+        artist: t.artists[0].name,
         cover: t.album.images[0]?.url,
         gameMode: mode || "RANDOM",
         previewUrl: preview,
-        options: options,
+        options: [
+          { id: t.id, title: t.name, artist: t.artists[0].name },
+          ...distractors,
+        ].sort(() => 0.5 - Math.random()),
       });
     }
-
-    if (finalGameTracks.length < 1)
-      return res.status(404).json({ error: "Sem músicas suficientes." });
-
-    console.log(`✅ Jogo pronto: ${finalGameTracks.length} faixas.`);
     res.json(finalGameTracks);
   } catch (error) {
-    console.error("Erro Fatal:", error.message);
-    if (error.response) {
-      console.error("Response data:", error.response.data);
-    }
     res.status(500).json({ error: "Server Error" });
   }
 });
 
-app.listen(PORT, () => console.log(`🚀 Servidor na porta ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Servidor a correr na porta ${PORT}`));
