@@ -37,35 +37,42 @@ const MyComputer = ({ windowId }) => {
   useEffect(() => {
     const loadData = async () => {
       if (currentUser?.uid) {
+        // Debug logs removed since issue is diagnosed as UID mismatch
         const rawData = await leaderboardApi.getUserStats(currentUser.uid);
-        const cleanData = normalizeData(rawData);
-        setUserData(cleanData);
 
-        if (cleanData?.totalScore) {
-          const r = await leaderboardApi.getUserRank(cleanData.totalScore);
-          setGlobalRank(r);
+        if (rawData) {
+          const cleanData = normalizeData(rawData);
+          setUserData(cleanData);
+
+          if (cleanData?.totalScore) {
+            const r = await leaderboardApi.getUserRank(cleanData.totalScore);
+            setGlobalRank(r);
+          } else {
+            setGlobalRank("Unranked");
+          }
+
+          const topArtist = getTopItemData(cleanData?.stats?.artists);
+          if (topArtist) {
+            const r = await leaderboardApi.getStatRank(
+              "artists",
+              topArtist.name,
+              topArtist.count
+            );
+            setArtistRank(r);
+          }
+
+          const topGenre = getTopItemData(cleanData?.stats?.genres);
+          if (topGenre) {
+            const r = await leaderboardApi.getStatRank(
+              "genres",
+              topGenre.name,
+              topGenre.count
+            );
+            setGenreRank(r);
+          }
         } else {
+          setUserData(null);
           setGlobalRank("Unranked");
-        }
-
-        const topArtist = getTopItemData(cleanData?.stats?.artists);
-        if (topArtist) {
-          const r = await leaderboardApi.getStatRank(
-            "artists",
-            topArtist.name,
-            topArtist.count
-          );
-          setArtistRank(r);
-        }
-
-        const topGenre = getTopItemData(cleanData?.stats?.genres);
-        if (topGenre) {
-          const r = await leaderboardApi.getStatRank(
-            "genres",
-            topGenre.name,
-            topGenre.count
-          );
-          setGenreRank(r);
         }
       }
       setLoading(false);
@@ -151,7 +158,7 @@ const MyComputer = ({ windowId }) => {
                     {userData?.gamesPlayed || 0}
                   </span>
                 </div>
-                {/* NOVO: Daily Drops Completed */}
+                {/* Display Daily Drops Completed */}
                 <div className="flex justify-between items-center border-b border-dotted border-[#D6D3CE] pb-1">
                   <span className="text-[#444]">Daily Drops Completed:</span>
                   <span className="font-bold text-[#444]">

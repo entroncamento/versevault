@@ -20,6 +20,7 @@ const DailyDropApp = ({ windowId }) => {
   useEffect(() => {
     const fetchDaily = async () => {
       try {
+        // Fetch attempt
         const res = await fetch(`${PROXY_BASE}/api/game/daily`);
 
         if (!res.ok) {
@@ -91,9 +92,7 @@ const DailyDropApp = ({ windowId }) => {
 
   // NEW: Function to record the win in Firestore
   const recordWin = async () => {
-    // We check if the user is authenticated and if the game status is 'WON'
-    // (though the logic below ensures this is only called on win)
-    if (currentUser && gameStatus === "PLAYING") {
+    if (currentUser) {
       // The API handles the increment of 'dailyDropsCompleted'
       await leaderboardApi.recordDailyDropWin(currentUser);
       console.log("Daily Drop win recorded successfully.");

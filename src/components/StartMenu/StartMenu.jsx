@@ -116,14 +116,6 @@ const StartMenu = ({ onClose }) => {
           {/* ESQUERDA (Apps Pinned) */}
           <div className="flex-[5] bg-xp-start-bodyLeft flex flex-col py-2 border-r border-xp-start-bodyRight">
             {/* ATALHO NOVO: Daily Drop Challenge */}
-            <LeftMenuItem
-              title="Daily Drop Challenge"
-              isBold
-              icon="/icons/search.png"
-              onClick={() => handleOpenApp("DAILY_DROP")}
-            />
-
-            <div className="h-[1px] bg-gradient-to-r from-transparent via-[#D6D3CE] to-transparent my-1 mx-2" />
 
             <LeftMenuItem
               title="My Computer"
@@ -142,7 +134,11 @@ const StartMenu = ({ onClose }) => {
               icon="/icons/notepad.png"
               onClick={() => handleOpenApp("LEADERBOARD")}
             />
-
+            <LeftMenuItem
+              title="Daily Drop"
+              icon="/icons/search.png"
+              onClick={() => handleOpenApp("DAILY_DROP")}
+            />
             <div className="flex-grow" />
           </div>
 
