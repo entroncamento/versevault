@@ -134,23 +134,68 @@ app.get("/api/game/daily", async (req, res) => {
     const daySeed = Math.floor(Date.now() / 86400000);
 
     // 2. Escolher um Offset "Aleatório" mas Determinístico
-    const offset = (daySeed * 17) % 500;
+    const offset = (daySeed * 97) % 500;
 
-    // 3. Buscar Artista ao Spotify (Artistas relevantes por popularidade)
-    const spotifyRes = await axios.get("https://api.spotify.com/v1/search", {
-      params: {
-        q: "year:1980-2023 genre:pop OR genre:rock OR genre:hip-hop",
-        type: "artist",
-        limit: 1,
-        offset: offset,
-      },
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    let artist = null;
 
-    const artist = spotifyRes.data.artists.items[0];
+    // --- TENTATIVA 1: Pesquisa Determinística (Daily) ---
+    try {
+      const spotifyResDaily = await axios.get(
+        "https://api.spotify.com/v1/search",
+        {
+          params: {
+            q: "genre:pop OR genre:rock OR genre:hip-hop OR genre:electronic",
+            type: "artist",
+            limit: 10,
+            offset: offset,
+          },
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      artist = spotifyResDaily.data.artists.items[0];
+    } catch (e) {
+      console.error(`❌ ERRO TENTATIVA 1: ${e.message}`);
+    }
 
+    // --- TENTATIVA 2: FALLBACK (Se a pesquisa diária falhar) ---
+    if (!artist) {
+      console.warn(
+        "⚠️ FALLBACK: Pesquisa diária falhou. Usando fallback de artista genérico."
+      );
+      try {
+        // CORREÇÃO FINAL: Busca por uma única letra ("q: 'a'"), o que garante resultados quase 100% do tempo.
+        const spotifyResFallback = await axios.get(
+          "https://api.spotify.com/v1/search",
+          {
+            params: {
+              q: "a", // A busca mais segura para garantir que o Spotify devolva algo
+              type: "artist",
+              limit: 1, // Basta um resultado
+              offset: 0,
+            },
+            headers: { Authorization: `Bearer ${token}` },
+          }
+        );
+
+        artist = spotifyResFallback.data.artists.items[0];
+
+        // Se falhar mesmo no fallback, o array é nulo.
+        if (!artist)
+          console.error(
+            "❌ FALLBACK CRÍTICO: O array de artistas do fallback veio vazio."
+          );
+      } catch (e) {
+        console.error(
+          "❌ FALLBACK CRÍTICO: O fallback também falhou (erro de rede/token)."
+        );
+      }
+    }
+
+    // Se *nenhuma* das tentativas encontrou um artista, é um erro real.
     if (!artist)
-      return res.status(404).json({ error: "Daily artist not found" });
+      return res
+        .status(404)
+        .json({ error: "Daily artist not found after fallback" });
 
     // 4. Buscar Top Track para Dica
     const topTracksRes = await axios.get(
@@ -178,6 +223,7 @@ app.get("/api/game/daily", async (req, res) => {
     res.json(gameData);
   } catch (error) {
     console.error("Daily Error:", error.message);
+    // Erro 500 para falha de servidor não antecipada (ex: token inválido)
     res.status(500).json({ error: "Server Error" });
   }
 });

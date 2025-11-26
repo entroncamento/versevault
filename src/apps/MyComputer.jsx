@@ -151,6 +151,13 @@ const MyComputer = ({ windowId }) => {
                     {userData?.gamesPlayed || 0}
                   </span>
                 </div>
+                {/* NOVO: Daily Drops Completed */}
+                <div className="flex justify-between items-center border-b border-dotted border-[#D6D3CE] pb-1">
+                  <span className="text-[#444]">Daily Drops Completed:</span>
+                  <span className="font-bold text-[#444]">
+                    {userData?.dailyDropsCompleted || 0}
+                  </span>
+                </div>
                 <div className="flex justify-between items-center">
                   <span className="text-[#444]">Total Memory (XP):</span>
                   <span className="font-bold text-[#444]">

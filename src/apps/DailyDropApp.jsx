@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useWindowManager } from "../contexts/WindowManagerContext";
+import { useAuth } from "../contexts/AuthContext"; // Import added for user context
+import { leaderboardApi } from "../services/leaderboardApi"; // Import added for saving stats
 
 const PROXY_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";
 
 const DailyDropApp = ({ windowId }) => {
   const { closeWindow } = useWindowManager();
+  const { currentUser } = useAuth(); // Get authenticated user info
 
   const [dailyData, setDailyData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -13,7 +16,7 @@ const DailyDropApp = ({ windowId }) => {
   const [gameStatus, setGameStatus] = useState("PLAYING");
   const [nextHintIndex, setNextHintIndex] = useState(0);
 
-  // Carregar os dados do artista do dia do servidor
+  // Load the daily artist data from the server
   useEffect(() => {
     const fetchDaily = async () => {
       try {
@@ -26,7 +29,7 @@ const DailyDropApp = ({ windowId }) => {
             name: "Server Offline",
             image: "/icons/doctor_watson.png",
             hints: [
-              "Erro de conexão: O servidor Express (backend) está desligado ou o endpoint não existe.",
+              "Connection error: The Express server (backend) is offline or the endpoint does not exist.",
             ],
             error: true,
           });
@@ -43,7 +46,7 @@ const DailyDropApp = ({ windowId }) => {
 
         setDailyData(data);
 
-        // Verificar LocalStorage para este dia específico
+        // Check LocalStorage for this specific day
         const savedState = JSON.parse(localStorage.getItem("daily_drop_state"));
 
         if (savedState && savedState.dayId === data.dayId) {
@@ -51,7 +54,7 @@ const DailyDropApp = ({ windowId }) => {
           setGameStatus(savedState.gameStatus);
           setNextHintIndex(savedState.attempts.length);
         } else {
-          localStorage.removeItem("daily_drop_state"); // Limpa dias velhos
+          localStorage.removeItem("daily_drop_state"); // Clear old days
         }
       } catch (e) {
         console.error("Daily Drop Fetch Failed:", e);
@@ -60,7 +63,7 @@ const DailyDropApp = ({ windowId }) => {
           name: "Connection Failed",
           image: "/icons/doctor_watson.png",
           hints: [
-            "Não foi possível contactar o servidor Express. Certifique-se de que o servidor Node (porta 3001) está a correr.",
+            "Could not reach the Express server. Ensure the Node server (port 3001) is running.",
           ],
           error: true,
         });
@@ -72,7 +75,7 @@ const DailyDropApp = ({ windowId }) => {
     fetchDaily();
   }, []);
 
-  // Guardar progresso no LocalStorage
+  // Save progress to LocalStorage
   useEffect(() => {
     if (dailyData && !dailyData.error) {
       localStorage.setItem(
@@ -86,6 +89,17 @@ const DailyDropApp = ({ windowId }) => {
     }
   }, [attempts, gameStatus, dailyData]);
 
+  // NEW: Function to record the win in Firestore
+  const recordWin = async () => {
+    // We check if the user is authenticated and if the game status is 'WON'
+    // (though the logic below ensures this is only called on win)
+    if (currentUser && gameStatus === "PLAYING") {
+      // The API handles the increment of 'dailyDropsCompleted'
+      await leaderboardApi.recordDailyDropWin(currentUser);
+      console.log("Daily Drop win recorded successfully.");
+    }
+  };
+
   const handleGuess = (e) => {
     e.preventDefault();
     if (!guess.trim() || gameStatus !== "PLAYING" || dailyData.error) return;
@@ -98,9 +112,10 @@ const DailyDropApp = ({ windowId }) => {
 
     if (cleanGuess === cleanName) {
       setGameStatus("WON");
+      recordWin(); // <-- Call the function to record the win
     } else {
       if (newAttempts.length >= 4) {
-        // 4 Dicas = 5 tentativas total (0 a 4)
+        // 4 hints = 5 total attempts (0 to 4)
         setGameStatus("LOST");
       } else {
         setNextHintIndex((prev) => prev + 1);
@@ -116,7 +131,7 @@ const DailyDropApp = ({ windowId }) => {
         <div className="flex flex-col items-center gap-2">
           <div className="w-6 h-6 border-2 border-[#003399] border-t-transparent rounded-full animate-spin"></div>
           <span className="text-xs text-gray-600">
-            A obter o Artista do Dia...
+            Fetching the Daily Artist...
           </span>
         </div>
       </div>
@@ -124,7 +139,7 @@ const DailyDropApp = ({ windowId }) => {
 
   return (
     <div className="h-full flex flex-col bg-[#ECE9D8] font-sans select-none">
-      {/* Topo */}
+      {/* Header */}
       <div className="bg-white border-b border-[#D6D3CE] p-3 flex items-center gap-3">
         <img
           src={dailyData?.image || "/icons/search.png"}
@@ -132,9 +147,9 @@ const DailyDropApp = ({ windowId }) => {
           alt="Search"
         />
         <div>
-          <h1 className="text-sm font-bold text-[#444]">Desafio Diário</h1>
+          <h1 className="text-sm font-bold text-[#444]">Daily Challenge</h1>
           <p className="text-[10px] text-gray-500">
-            Um artista novo a cada 24 horas.
+            A new artist every 24 hours.
           </p>
         </div>
         <div className="flex-grow text-right text-xs font-bold text-[#003399]">
@@ -142,18 +157,17 @@ const DailyDropApp = ({ windowId }) => {
         </div>
       </div>
 
-      {/* Área de Jogo */}
+      {/* Game Area */}
       <div className="flex-grow p-4 overflow-y-auto flex flex-col gap-4">
-        {/* Cartão de Dicas */}
+        {/* Hint Card */}
         <div className="bg-white border border-[#7F9DB9] p-1 shadow-sm relative">
           <div className="bg-[#EBF4FC] p-2 mb-1 border-b border-[#D6D3CE]">
             <span className="font-bold text-xs text-[#003399]">
-              Dicas Reveladas:
+              Revealed Hints:
             </span>
           </div>
 
           <div className="flex flex-col gap-2 p-2">
-            {/* CORREÇÃO: Usa optional chaining para prevenir o erro de 'map' */}
             {dailyData?.hints?.map((hint, idx) => {
               const isVisible =
                 idx <= nextHintIndex || gameStatus !== "PLAYING";
@@ -175,7 +189,7 @@ const DailyDropApp = ({ windowId }) => {
                     </span>
                   ) : (
                     <span className="text-xs text-gray-400 italic py-0.5">
-                      Bloqueado...
+                      Locked...
                     </span>
                   )}
                 </div>
@@ -184,7 +198,7 @@ const DailyDropApp = ({ windowId }) => {
           </div>
         </div>
 
-        {/* Resultado Final ou Mensagem de Erro */}
+        {/* Final Result or Error Message */}
         {gameStatus !== "PLAYING" && (
           <div
             className={`border-2 p-3 text-center shadow-sm relative overflow-hidden ${
@@ -197,10 +211,10 @@ const DailyDropApp = ({ windowId }) => {
           >
             <h2 className="font-bold text-lg mb-1 relative z-10">
               {dailyData?.error
-                ? "🛑 ERRO CRÍTICO"
+                ? "🛑 CRITICAL ERROR"
                 : gameStatus === "WON"
-                ? "🎉 Parabéns!"
-                : "💀 Fim do Jogo"}
+                ? "🎉 Congratulations!"
+                : "💀 Game Over"}
             </h2>
 
             {dailyData?.image && !dailyData.error && (
@@ -208,35 +222,35 @@ const DailyDropApp = ({ windowId }) => {
                 <img
                   src={dailyData.image}
                   className="w-24 h-24 object-cover border-2 border-white shadow-md rounded-sm"
-                  alt="Artista Revelado"
+                  alt="Revealed Artist"
                 />
               </div>
             )}
 
             <p className="text-xs text-gray-700 mb-2 relative z-10">
               {dailyData?.error
-                ? "Verifique a consola ou inicie o servidor Express."
-                : `O artista era: ${dailyData.name}`}
+                ? "Check the console or start the Express server."
+                : `The artist was: ${dailyData.name}`}
             </p>
             <p className="text-[10px] text-gray-500 mb-2">
               {dailyData?.error
-                ? "Tente reiniciar o servidor Node ou o Vite."
-                : "Volta amanhã para um novo desafio!"}
+                ? "Try restarting the Node server or Vite."
+                : "Come back tomorrow for a new challenge!"}
             </p>
             <button
               onClick={() => closeWindow(windowId)}
               className="mt-2 px-3 py-1 bg-white border border-gray-400 rounded text-xs hover:bg-gray-50 relative z-10"
             >
-              Fechar
+              Close
             </button>
           </div>
         )}
 
-        {/* Input e Histórico de Tentativas */}
+        {/* Input and Attempt History */}
         {gameStatus === "PLAYING" && !dailyData.error && (
           <div className="flex flex-col gap-2">
             <div className="text-xs text-gray-500 font-bold">
-              Tentativas ({attempts.length}/4):
+              Attempts ({attempts.length}/4):
             </div>
             {attempts.map((att, i) => (
               <div
@@ -260,7 +274,7 @@ const DailyDropApp = ({ windowId }) => {
               value={guess}
               onChange={(e) => setGuess(e.target.value)}
               className="flex-grow border-2 border-[#7F9DB9] p-1 text-sm outline-none focus:border-[#003399]"
-              placeholder="Escreve o nome do artista..."
+              placeholder="Type the artist's name..."
               autoFocus
             />
             <button
@@ -268,7 +282,7 @@ const DailyDropApp = ({ windowId }) => {
               disabled={!guess.trim()}
               className="px-4 py-1 bg-white border border-[#003C74] rounded-[3px] text-xs font-bold shadow-sm active:translate-y-px"
             >
-              Adivinhar
+              Guess
             </button>
           </form>
         </div>
