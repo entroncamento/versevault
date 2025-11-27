@@ -10,6 +10,7 @@ import quizIcon from "/icons/Minesweeper.ico";
 import leaderboardIcon from "/icons/notepad.png";
 import dailyDropIcon from "/icons/search.png"; // Novo ícone
 import wmpIconUrl from "/icons/wmpIcon.png"; // Novo ícone
+import mydocsIcon from "/icons/MyDocuments.png";
 
 const Desktop = () => {
   const { windows, openWindow } = useWindowManager();
@@ -55,6 +56,13 @@ const Desktop = () => {
       icon: wmpIconUrl, // Usa a variável criada acima
       action: "MEDIA_PLAYER",
       position: { x: 20, y: 380 },
+    },
+    {
+      id: "mydocs",
+      label: "My Documents",
+      icon: mydocsIcon,
+      action: "MY_DOCUMENTS",
+      position: { x: 20, y: 20 }, // Move o "My Computer" para baixo ou ajusta as posições
     },
   ]);
 

@@ -7,6 +7,7 @@ import LeaderboardApp from "../apps/LeaderboardApp.jsx";
 import UserAccountsApp from "../apps/UserAccountsApp.jsx";
 import DailyDropApp from "../apps/DailyDropApp.jsx";
 import MediaPlayerApp from "../apps/MediaPlayerApp.jsx";
+import MyDocumentsApp from "../apps/MyDocumentsApp.jsx";
 
 const appRegistry = {
   QUIZ: {
@@ -39,6 +40,11 @@ const appRegistry = {
     component: MediaPlayerApp,
     title: "VerseVault Media Player",
     icon: "/icons/wmpIcon.png", // Vê a nota sobre o ícone abaixo
+  },
+  MY_DOCUMENTS: {
+    component: MyDocumentsApp, // Não te esqueças de importar no topo
+    title: "My Documents",
+    icon: "https://win98icons.alexmeub.com/icons/png/directory_open_file_mydocs-4.png",
   },
 };
 

@@ -20,7 +20,7 @@ import { leaderboardApi } from "../services/leaderboardApi";
 
 const PROXY_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";
 
-// --- VISUALIZADOR CANVAS ---
+// --- VISUALIZADOR CANVAS (MANTIDO ORIGINAL) ---
 const CanvasVisualizer = ({ audioRef, isPlaying, cover }) => {
   const canvasRef = useRef(null);
   const [visMode, setVisMode] = useState(0);
@@ -195,7 +195,8 @@ const CanvasVisualizer = ({ audioRef, isPlaying, cover }) => {
   );
 };
 
-const MediaPlayerApp = ({ windowId }) => {
+// --- COMPONENTE PRINCIPAL (ATUALIZADO) ---
+const MediaPlayerApp = ({ windowId, trackToPlay }) => {
   const { closeWindow } = useWindowManager();
   const { currentUser } = useAuth();
   const audioRef = useRef(null);
@@ -230,7 +231,20 @@ const MediaPlayerApp = ({ windowId }) => {
     (t) => t.title === currentTrack.title && t.artist === currentTrack.artist
   );
 
-  // --- FUNÇÃO DE LOGIN SPOTIFY ---
+  // --- NOVO: Auto-Play quando aberto via My Documents ---
+  useEffect(() => {
+    if (trackToPlay) {
+      // Substitui a playlist pela música clicada e toca
+      setPlaylist([trackToPlay]);
+      setCurrentTrackIndex(0);
+      setActiveView("PLAYLIST");
+
+      // Pequeno timeout para garantir que o DOM do áudio está pronto
+      setTimeout(() => setIsPlaying(true), 100);
+    }
+  }, [trackToPlay]);
+
+  // --- FUNÇÃO DE LOGIN SPOTIFY (MANTIDO) ---
   const connectSpotify = (onSuccess) => {
     const popup = window.open(
       `${PROXY_BASE}/api/spotify/login`,
@@ -249,7 +263,7 @@ const MediaPlayerApp = ({ windowId }) => {
     window.addEventListener("message", receiveMessage, false);
   };
 
-  // --- FETCH TOP ARTISTS ---
+  // --- FETCH TOP ARTISTS (MANTIDO) ---
   const fetchUserTopArtists = async (token) => {
     try {
       const res = await fetch(`${PROXY_BASE}/api/spotify/top`, {
@@ -274,7 +288,7 @@ const MediaPlayerApp = ({ windowId }) => {
     }
   };
 
-  // --- SALVAR MÚSICA ATUAL NO SPOTIFY ---
+  // --- SALVAR MÚSICA ATUAL NO SPOTIFY (MANTIDO) ---
   const handleSaveCurrentToSpotify = () => {
     if (
       !currentTrack ||
@@ -316,7 +330,7 @@ const MediaPlayerApp = ({ windowId }) => {
     else connectSpotify((token) => performSave(token));
   };
 
-  // --- AUTOCOMPLETE LOGIC ---
+  // --- AUTOCOMPLETE LOGIC (MANTIDO) ---
   useEffect(() => {
     const fetchSuggestions = async () => {
       if (vibeInput.length < 3) {
@@ -349,7 +363,7 @@ const MediaPlayerApp = ({ windowId }) => {
     handleVibeSubmit(null, prompt);
   };
 
-  // Carregar dados do utilizador
+  // Carregar dados do utilizador (MANTIDO)
   useEffect(() => {
     const loadUserTaste = async () => {
       if (currentUser?.uid) {
@@ -409,10 +423,14 @@ const MediaPlayerApp = ({ windowId }) => {
     setActiveView("PLAYLIST");
   };
 
+  // --- MODIFICADO: Atualização da Playlist e Auto-Play ---
+  // Adicionado `!trackToPlay` para evitar conflito com o useEffect da abertura do arquivo
   useEffect(() => {
-    if (playlist.length > 0 && audioRef.current && !isPlaying)
+    if (playlist.length > 0 && audioRef.current && !isPlaying && !trackToPlay)
       setTimeout(() => setIsPlaying(true), 500);
-  }, [playlist]);
+  }, [playlist]); // Removido trackToPlay da dependência para focar apenas na mudança da playlist em si
+
+  // Lógica de Play/Pause do elemento Audio (MANTIDO)
   useEffect(() => {
     if (audioRef.current) {
       if (isPlaying) {
@@ -424,6 +442,7 @@ const MediaPlayerApp = ({ windowId }) => {
       } else audioRef.current.pause();
     }
   }, [isPlaying, currentTrackIndex]);
+
   const handleTimeUpdate = () => {
     if (audioRef.current) {
       setCurrentTime(audioRef.current.currentTime);
@@ -527,6 +546,7 @@ const MediaPlayerApp = ({ windowId }) => {
       <div className="flex-grow flex overflow-hidden bg-[#2C3E50]">
         <div className="flex-1 flex flex-col p-2 bg-gradient-to-b from-[#627390] to-[#2C3E50]">
           <div className="flex-grow relative shadow-xl border border-[#333] bg-black group">
+            {/* CANVAS VISUALIZER MANTIDO */}
             <CanvasVisualizer
               audioRef={audioRef}
               isPlaying={isPlaying}
@@ -563,7 +583,6 @@ const MediaPlayerApp = ({ windowId }) => {
                 <span className="text-xs font-bold text-[#182C68]">
                   Playlist
                 </span>
-                {/* BOTÃO AGORA SALVA APENAS A MÚSICA ATUAL */}
                 <button
                   onClick={handleSaveCurrentToSpotify}
                   disabled={isExporting || !currentTrack.title}

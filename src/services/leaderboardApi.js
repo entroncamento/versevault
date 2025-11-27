@@ -61,13 +61,14 @@ export const leaderboardApi = {
     if (!user) return;
     const userRef = doc(db, "leaderboard", user.uid);
 
-    // ATUALIZAÇÃO: Agora guardamos URL e Capa para poder tocar a partir da lista de likes
+    // CORREÇÃO: Adicionado 'uri' para permitir exportação para Spotify
     const trackData = {
       title: track.title,
       artist: track.artist,
       url: track.url || "",
       cover: track.cover || "",
       id: track.id || "",
+      uri: track.uri || "", // <--- O FUNDAMENTAL ESTÁ AQUI
     };
 
     try {
@@ -163,6 +164,78 @@ export const leaderboardApi = {
       }));
     } catch (e) {
       return [];
+    }
+  },
+
+  // --- NOVAS FUNÇÕES PARA O MY DOCUMENTS ---
+
+  async createFolder(user, folderName) {
+    if (!user || !folderName) return;
+    const userRef = doc(db, "leaderboard", user.uid);
+    const newFolder = {
+      id: crypto.randomUUID(), // Gera ID único (Nativo do browser)
+      name: folderName,
+      tracks: [], // Array de IDs ou Track Objects
+    };
+
+    try {
+      await setDoc(
+        userRef,
+        {
+          folders: arrayUnion(newFolder),
+        },
+        { merge: true }
+      );
+      return true;
+    } catch (e) {
+      console.error("Erro criar pasta:", e);
+      return false;
+    }
+  },
+
+  async addTrackToFolder(user, folder, track) {
+    const userRef = doc(db, "leaderboard", user.uid);
+    const docSnap = await getDoc(userRef);
+    if (!docSnap.exists()) return;
+
+    const data = docSnap.data();
+    const folders = data.folders || [];
+
+    const targetFolderIndex = folders.findIndex((f) => f.id === folder.id);
+    if (targetFolderIndex === -1) return;
+
+    // Adiciona track se não existir
+    const trackExists = folders[targetFolderIndex].tracks.some(
+      (t) => t.title === track.title
+    );
+    if (!trackExists) {
+      folders[targetFolderIndex].tracks.push(track);
+      await setDoc(userRef, { folders }, { merge: true });
+    }
+  },
+
+  // --- NOVO: REMOVER PASTA ---
+  async deleteFolder(user, folderId) {
+    if (!user || !folderId) return;
+
+    const userRef = doc(db, "leaderboard", user.uid);
+    const docSnap = await getDoc(userRef);
+
+    if (!docSnap.exists()) return false;
+
+    const data = docSnap.data();
+    const folders = data.folders || [];
+
+    // Filtra o array, removendo o objeto da pasta que corresponde ao folderId
+    const updatedFolders = folders.filter((f) => f.id !== folderId);
+
+    try {
+      // Atualiza o documento no Firestore com o novo array de pastas
+      await setDoc(userRef, { folders: updatedFolders }, { merge: true });
+      return true;
+    } catch (e) {
+      console.error("Erro ao apagar pasta:", e);
+      return false;
     }
   },
 };

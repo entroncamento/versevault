@@ -383,6 +383,47 @@ app.post("/api/spotify/save", async (req, res) => {
   }
 });
 
+// NOVO: Endpoint para criar Playlist no Spotify
+app.post("/api/spotify/create-playlist", async (req, res) => {
+  const { token, name, trackUris } = req.body; // trackUris é array de "spotify:track:..."
+
+  try {
+    // 1. Obter o ID do utilizador atual
+    const userRes = await axios.get("https://api.spotify.com/v1/me", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const userId = userRes.data.id;
+
+    // 2. Criar a Playlist vazia
+    const createRes = await axios.post(
+      `https://api.spotify.com/v1/users/${userId}/playlists`,
+      { name: `VerseVault: ${name}`, public: false },
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    const playlistId = createRes.data.id;
+
+    // 3. Adicionar músicas (Spotify aceita max 100 de cada vez, aqui simplificamos)
+    if (trackUris && trackUris.length > 0) {
+      await axios.post(
+        `https://api.spotify.com/v1/playlists/${playlistId}/tracks`,
+        { uris: trackUris.slice(0, 99) }, // Limite de segurança
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+    }
+
+    res.json({
+      success: true,
+      playlistUrl: createRes.data.external_urls.spotify,
+    });
+  } catch (error) {
+    console.error(
+      "Erro ao criar playlist:",
+      error.response?.data || error.message
+    );
+    res.status(500).json({ error: "Falha ao criar playlist no Spotify" });
+  }
+});
+
 // --- NOVO: Autocomplete de Pesquisa (Sugestões) ---
 app.get("/api/spotify/search-suggestions", async (req, res) => {
   const { q } = req.query;
