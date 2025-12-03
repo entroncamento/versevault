@@ -57,7 +57,7 @@ const BootScreen = ({ onComplete }) => {
       {/* --- FOOTER (Copyright) --- */}
       {/* Posicionado no canto inferior esquerdo, como no print */}
       <div className="absolute bottom-4 left-4 text-white text-[10px] font-medium">
-        Copyright © Microsoft Corporation
+        Copyright © VerseVault Corporation
       </div>
     </div>
   );

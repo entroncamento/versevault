@@ -4,15 +4,15 @@ import {
   FaPause,
   FaStop,
   FaVolumeUp,
+  FaVolumeMute,
+  FaVolumeDown,
   FaSearch,
   FaMusic,
   FaHeart,
   FaRegHeart,
   FaChevronLeft,
   FaChevronRight,
-  FaList,
   FaSpotify,
-  FaLink,
 } from "react-icons/fa";
 import { useWindowManager } from "../contexts/WindowManagerContext";
 import { useAuth } from "../contexts/AuthContext";
@@ -20,7 +20,7 @@ import { leaderboardApi } from "../services/leaderboardApi";
 
 const PROXY_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";
 
-// --- VISUALIZADOR CANVAS (MANTIDO ORIGINAL) ---
+// --- VISUALIZADOR CANVAS (MANTIDO) ---
 const CanvasVisualizer = ({ audioRef, isPlaying, cover }) => {
   const canvasRef = useRef(null);
   const [visMode, setVisMode] = useState(0);
@@ -195,29 +195,25 @@ const CanvasVisualizer = ({ audioRef, isPlaying, cover }) => {
   );
 };
 
-// --- COMPONENTE PRINCIPAL (ATUALIZADO) ---
+// --- COMPONENTE PRINCIPAL ---
 const MediaPlayerApp = ({ windowId, trackToPlay }) => {
   const { closeWindow } = useWindowManager();
   const { currentUser } = useAuth();
   const audioRef = useRef(null);
 
-  // Playlist e Áudio
   const [playlist, setPlaylist] = useState([]);
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [volume, setVolume] = useState(0.5);
 
-  // Navegação e AI
   const [activeView, setActiveView] = useState("PLAYLIST");
   const [vibeInput, setVibeInput] = useState("");
   const [isLoadingAi, setIsLoadingAi] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-
-  // Autocomplete
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
-
   const [userTasteContext, setUserTasteContext] = useState("");
   const [likedTracks, setLikedTracks] = useState([]);
   const [spotifyToken, setSpotifyToken] = useState(null);
@@ -231,27 +227,27 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
     (t) => t.title === currentTrack.title && t.artist === currentTrack.artist
   );
 
-  // --- NOVO: Auto-Play quando aberto via My Documents ---
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.volume = volume;
+    }
+  }, [volume]);
+
   useEffect(() => {
     if (trackToPlay) {
-      // Substitui a playlist pela música clicada e toca
       setPlaylist([trackToPlay]);
       setCurrentTrackIndex(0);
       setActiveView("PLAYLIST");
-
-      // Pequeno timeout para garantir que o DOM do áudio está pronto
       setTimeout(() => setIsPlaying(true), 100);
     }
   }, [trackToPlay]);
 
-  // --- FUNÇÃO DE LOGIN SPOTIFY (MANTIDO) ---
   const connectSpotify = (onSuccess) => {
     const popup = window.open(
       `${PROXY_BASE}/api/spotify/login`,
       "Spotify Login",
       "width=500,height=600"
     );
-
     const receiveMessage = async (event) => {
       if (event.data.type === "SPOTIFY_TOKEN") {
         const token = event.data.token;
@@ -263,7 +259,6 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
     window.addEventListener("message", receiveMessage, false);
   };
 
-  // --- FETCH TOP ARTISTS (MANTIDO) ---
   const fetchUserTopArtists = async (token) => {
     try {
       const res = await fetch(`${PROXY_BASE}/api/spotify/top`, {
@@ -288,7 +283,6 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
     }
   };
 
-  // --- SALVAR MÚSICA ATUAL NO SPOTIFY (MANTIDO) ---
   const handleSaveCurrentToSpotify = () => {
     if (
       !currentTrack ||
@@ -298,17 +292,13 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
       alert("Play a song first!");
       return;
     }
-
     const performSave = async (token) => {
       setIsExporting(true);
       try {
         const res = await fetch(`${PROXY_BASE}/api/spotify/save`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            token,
-            track: currentTrack, // Envia apenas a música atual
-          }),
+          body: JSON.stringify({ token, track: currentTrack }),
         });
         const data = await res.json();
         if (data.success) {
@@ -325,12 +315,10 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
         setIsExporting(false);
       }
     };
-
     if (spotifyToken) performSave(spotifyToken);
     else connectSpotify((token) => performSave(token));
   };
 
-  // --- AUTOCOMPLETE LOGIC (MANTIDO) ---
   useEffect(() => {
     const fetchSuggestions = async () => {
       if (vibeInput.length < 3) {
@@ -355,7 +343,6 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
   }, [vibeInput]);
 
   const handleSelectSuggestion = (track) => {
-    // Trigger search immediately for the selected track
     const prompt = `Songs similar to ${track.name} by ${track.artist}`;
     setVibeInput(prompt);
     setSuggestions([]);
@@ -363,7 +350,6 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
     handleVibeSubmit(null, prompt);
   };
 
-  // Carregar dados do utilizador (MANTIDO)
   useEffect(() => {
     const loadUserTaste = async () => {
       if (currentUser?.uid) {
@@ -423,14 +409,11 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
     setActiveView("PLAYLIST");
   };
 
-  // --- MODIFICADO: Atualização da Playlist e Auto-Play ---
-  // Adicionado `!trackToPlay` para evitar conflito com o useEffect da abertura do arquivo
   useEffect(() => {
     if (playlist.length > 0 && audioRef.current && !isPlaying && !trackToPlay)
       setTimeout(() => setIsPlaying(true), 500);
-  }, [playlist]); // Removido trackToPlay da dependência para focar apenas na mudança da playlist em si
+  }, [playlist]);
 
-  // Lógica de Play/Pause do elemento Audio (MANTIDO)
   useEffect(() => {
     if (audioRef.current) {
       if (isPlaying) {
@@ -492,8 +475,27 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
     return `${minutes}:${seconds.toString().padStart(2, "0")}`;
   };
 
+  const getVolumeIcon = () => {
+    if (volume === 0) return <FaVolumeMute className="text-gray-400 text-xs" />;
+    if (volume < 0.5) return <FaVolumeDown className="text-gray-400 text-xs" />;
+    return <FaVolumeUp className="text-gray-400 text-xs" />;
+  };
+
   return (
     <div className="flex flex-col h-full bg-[#2C3E50] text-white font-sans select-none">
+      {/* --- ESTILO INJETADO PARA FORÇAR REMOÇÃO DO SCROLLBAR --- */}
+      <style>
+        {`
+          .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+          }
+          .hide-scrollbar {
+            -ms-overflow-style: none;  /* IE and Edge */
+            scrollbar-width: none;  /* Firefox */
+          }
+        `}
+      </style>
+
       <audio
         ref={audioRef}
         crossOrigin="anonymous"
@@ -546,7 +548,6 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
       <div className="flex-grow flex overflow-hidden bg-[#2C3E50]">
         <div className="flex-1 flex flex-col p-2 bg-gradient-to-b from-[#627390] to-[#2C3E50]">
           <div className="flex-grow relative shadow-xl border border-[#333] bg-black group">
-            {/* CANVAS VISUALIZER MANTIDO */}
             <CanvasVisualizer
               audioRef={audioRef}
               isPlaying={isPlaying}
@@ -591,7 +592,8 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
                   <FaSpotify /> {isExporting ? "Saving..." : "Save Song"}
                 </button>
               </div>
-              <div className="overflow-y-auto flex-grow bg-white">
+              {/* USO DA CLASSE hide-scrollbar AQUI */}
+              <div className="overflow-y-auto flex-grow bg-white hide-scrollbar">
                 {playlist.length === 0 ? (
                   <div className="p-4 text-center text-xs text-gray-400 mt-10 flex flex-col items-center">
                     <span>Playlist empty.</span>
@@ -647,7 +649,7 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
                   <FaHeart className="text-red-500 text-[10px]" /> Favorites
                 </span>
               </div>
-              <div className="overflow-y-auto flex-grow bg-white">
+              <div className="overflow-y-auto flex-grow bg-white hide-scrollbar">
                 {likedTracks.length === 0 ? (
                   <div className="p-4 text-center text-xs text-gray-400 mt-10">
                     No liked songs yet.
@@ -698,10 +700,8 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
                     placeholder="Ex: Late night jazz, Mac Miller - Self Care..."
                     className="w-full p-2 text-xs border-2 border-[#7F9DB9] rounded-sm focus:border-[#3C7FB1] outline-none shadow-inner font-sans"
                   />
-
-                  {/* LISTA DE SUGESTÕES FLUTUANTE */}
                   {showSuggestions && suggestions.length > 0 && (
-                    <div className="absolute top-full left-0 w-full bg-white border border-[#7F9DB9] shadow-lg z-50 max-h-40 overflow-y-auto">
+                    <div className="absolute top-full left-0 w-full bg-white border border-[#7F9DB9] shadow-lg z-50 max-h-40 overflow-y-auto hide-scrollbar">
                       {suggestions.map((s) => (
                         <div
                           key={s.id}
@@ -725,17 +725,16 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
                   )}
                 </div>
 
-                {/* BOTÕES E CONTEXTO */}
                 {!spotifyToken ? (
                   <button
                     onClick={() => connectSpotify(fetchUserTopArtists)}
                     className="text-xs flex items-center justify-center gap-2 bg-[#191414] text-white py-1.5 px-2 rounded hover:bg-[#1DB954] transition-colors shadow-sm"
                   >
-                    <FaSpotify size={14} /> Connect Spotify for personalized AI
+                    <FaSpotify size={14} /> Connect Spotify
                   </button>
                 ) : (
                   <div className="text-[9px] text-green-700 bg-green-100 p-1 border border-green-300 rounded flex items-center gap-1 justify-center">
-                    <FaSpotify /> <span>Spotify Linked & Syncing</span>
+                    <FaSpotify /> <span>Spotify Linked</span>
                   </div>
                 )}
 
@@ -782,7 +781,8 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
             {formatTime(duration)}
           </span>
         </div>
-        <div className="flex items-center justify-center gap-5 pb-1">
+
+        <div className="flex items-center justify-center gap-5 pb-1 relative">
           <button
             onClick={() => {
               setIsPlaying(false);
@@ -802,11 +802,20 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
               <FaPlay className="text-[#182C68] text-lg ml-1" />
             )}
           </button>
-          <div className="flex items-center gap-1 ml-4">
-            <FaVolumeUp className="text-gray-400 text-xs" />
-            <div className="w-12 h-1.5 bg-black rounded-full overflow-hidden border border-gray-600">
-              <div className="w-3/4 h-full bg-[#42B638]" />
-            </div>
+
+          {/* SLIDER DE VOLUME FUNCIONAL */}
+          <div className="flex items-center gap-2 absolute right-0 bottom-1">
+            {getVolumeIcon()}
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value={volume}
+              onChange={(e) => setVolume(parseFloat(e.target.value))}
+              className="w-16 h-1.5 bg-black rounded-full appearance-none cursor-pointer accent-[#42B638] border border-[#555]"
+              title={`Volume: ${Math.round(volume * 100)}%`}
+            />
           </div>
         </div>
       </div>

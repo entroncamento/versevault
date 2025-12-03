@@ -152,8 +152,8 @@ const StartMenu = ({ onClose }) => {
             />
 
             <LeftMenuItem
-              title="Windows Media Player"
-              subtitle="Play music and videos"
+              title="VerseVault Media Player"
+              subtitle="Play and discover music"
               icon="/icons/wmpIcon.png"
               onClick={() => handleOpenApp("MEDIA_PLAYER")}
             />
