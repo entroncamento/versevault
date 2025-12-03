@@ -18,7 +18,8 @@ import { useWindowManager } from "../contexts/WindowManagerContext";
 import { useAuth } from "../contexts/AuthContext";
 import { leaderboardApi } from "../services/leaderboardApi";
 
-const PROXY_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";
+// Usa o proxy ou localhost direto
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
 
 // --- VISUALIZADOR CANVAS (MANTIDO) ---
 const CanvasVisualizer = ({ audioRef, isPlaying, cover }) => {
@@ -108,8 +109,6 @@ const CanvasVisualizer = ({ audioRef, isPlaying, cover }) => {
       } else if (visMode === 1) {
         ctx.lineWidth = 2;
         ctx.strokeStyle = "#00FF00";
-        ctx.shadowBlur = 5;
-        ctx.shadowColor = "#00FF00";
         ctx.beginPath();
         const sliceWidth = width / bufferLength;
         let x = 0;
@@ -122,7 +121,6 @@ const CanvasVisualizer = ({ audioRef, isPlaying, cover }) => {
         }
         ctx.lineTo(width, height / 2);
         ctx.stroke();
-        ctx.shadowBlur = 0;
       } else if (visMode === 2) {
         const centerX = width / 2;
         const centerY = height / 2;
@@ -167,7 +165,7 @@ const CanvasVisualizer = ({ audioRef, isPlaying, cover }) => {
       {!isPlaying && (
         <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
           <img
-            src="/icons/wmp_logo.png"
+            src="/icons/wmpIcon.png"
             className="w-16 h-16 opacity-30"
             onError={(e) => (e.target.style.display = "none")}
             alt="WMP"
@@ -211,9 +209,6 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
   const [activeView, setActiveView] = useState("PLAYLIST");
   const [vibeInput, setVibeInput] = useState("");
   const [isLoadingAi, setIsLoadingAi] = useState(false);
-  const [isExporting, setIsExporting] = useState(false);
-  const [suggestions, setSuggestions] = useState([]);
-  const [showSuggestions, setShowSuggestions] = useState(false);
   const [userTasteContext, setUserTasteContext] = useState("");
   const [likedTracks, setLikedTracks] = useState([]);
   const [spotifyToken, setSpotifyToken] = useState(null);
@@ -228,9 +223,7 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
   );
 
   useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.volume = volume;
-    }
+    if (audioRef.current) audioRef.current.volume = volume;
   }, [volume]);
 
   useEffect(() => {
@@ -242,9 +235,10 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
     }
   }, [trackToPlay]);
 
+  // LOGIN SPOTIFY
   const connectSpotify = (onSuccess) => {
     const popup = window.open(
-      `${PROXY_BASE}/api/spotify/login`,
+      `http://127.0.0.1:3001/api/spotify/login`, // <--- Força este URL
       "Spotify Login",
       "width=500,height=600"
     );
@@ -259,120 +253,20 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
     window.addEventListener("message", receiveMessage, false);
   };
 
-  const fetchUserTopArtists = async (token) => {
-    try {
-      const res = await fetch(`${PROXY_BASE}/api/spotify/top`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token }),
-      });
-      const data = await res.json();
-      if (data.artists && data.artists.length > 0) {
-        const spotifyTaste = `Your real Spotify top artists are: ${data.artists.join(
-          ", "
-        )}. `;
-        setUserTasteContext((prev) => spotifyTaste + prev);
-        alert(
-          `Sync successful! AI now knows you love: ${data.artists
-            .slice(0, 3)
-            .join(", ")}...`
-        );
-      }
-    } catch (e) {
-      console.error("Failed to fetch top artists", e);
-    }
-  };
-
-  const handleSaveCurrentToSpotify = () => {
-    if (
-      !currentTrack ||
-      !currentTrack.title ||
-      currentTrack.title === "No Media"
-    ) {
-      alert("Play a song first!");
-      return;
-    }
-    const performSave = async (token) => {
-      setIsExporting(true);
-      try {
-        const res = await fetch(`${PROXY_BASE}/api/spotify/save`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token, track: currentTrack }),
-        });
-        const data = await res.json();
-        if (data.success) {
-          alert(
-            `"${currentTrack.title}" saved to your Spotify Liked Songs! 💚`
-          );
-        } else {
-          alert("Could not save song.");
-        }
-      } catch (e) {
-        console.error(e);
-        alert("Error saving song.");
-      } finally {
-        setIsExporting(false);
-      }
-    };
-    if (spotifyToken) performSave(spotifyToken);
-    else connectSpotify((token) => performSave(token));
-  };
-
-  useEffect(() => {
-    const fetchSuggestions = async () => {
-      if (vibeInput.length < 3) {
-        setSuggestions([]);
-        return;
-      }
-      try {
-        const res = await fetch(
-          `${PROXY_BASE}/api/spotify/search-suggestions?q=${encodeURIComponent(
-            vibeInput
-          )}`
-        );
-        const data = await res.json();
-        setSuggestions(data);
-        setShowSuggestions(true);
-      } catch (e) {
-        console.error("Autocomplete error", e);
-      }
-    };
-    const timeoutId = setTimeout(fetchSuggestions, 300);
-    return () => clearTimeout(timeoutId);
-  }, [vibeInput]);
-
-  const handleSelectSuggestion = (track) => {
-    const prompt = `Songs similar to ${track.name} by ${track.artist}`;
-    setVibeInput(prompt);
-    setSuggestions([]);
-    setShowSuggestions(false);
-    handleVibeSubmit(null, prompt);
-  };
-
+  // LOAD USER TASTE
   useEffect(() => {
     const loadUserTaste = async () => {
       if (currentUser?.uid) {
         try {
           const stats = await leaderboardApi.getUserStats(currentUser.uid);
           let contextString = "";
-          if (stats?.stats?.artists) {
-            const topArtists = Object.entries(stats.stats.artists)
-              .sort(([, countA], [, countB]) => countB - countA)
-              .slice(0, 3)
-              .map(([artist]) => artist)
-              .join(", ");
-            if (topArtists)
-              contextString += `User loves artists: ${topArtists}. `;
-          }
-          if (stats?.likedTracks && Array.isArray(stats.likedTracks)) {
+          if (stats?.likedTracks) {
             setLikedTracks(stats.likedTracks);
             const likedNames = stats.likedTracks
               .slice(0, 5)
-              .map((t) => `"${t.title}" by ${t.artist}`)
+              .map((t) => `${t.title} by ${t.artist}`)
               .join(", ");
-            if (likedNames)
-              contextString += `User liked songs: ${likedNames}. `;
+            if (likedNames) contextString += `User likes: ${likedNames}. `;
           }
           if (contextString) setUserTasteContext(contextString);
         } catch (e) {}
@@ -381,34 +275,56 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
     loadUserTaste();
   }, [currentUser]);
 
+  // HANDLE AI DJ SUBMIT
+  const handleVibeSubmit = async (e) => {
+    if (e) e.preventDefault();
+    if (!vibeInput.trim()) return;
+
+    setIsLoadingAi(true);
+    try {
+      // CHAMADA AO SERVIDOR (Backend faz a magia com a Groq)
+      const res = await fetch(`${API_URL}/api/ai/recommend`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          vibe: vibeInput,
+          userContext: userTasteContext,
+        }),
+      });
+
+      if (!res.ok) throw new Error("Server error");
+      const data = await res.json();
+
+      const newTracks = Array.isArray(data) ? data : [data];
+      if (newTracks.length === 0) {
+        alert("No tracks found with preview audio.");
+      } else {
+        setPlaylist((prev) => [...prev, ...newTracks]);
+        setCurrentTrackIndex(playlist.length); // Toca a primeira da nova leva
+        setActiveView("PLAYLIST");
+        setVibeInput("");
+      }
+    } catch (error) {
+      console.error("AI Error:", error);
+      alert("AI DJ is offline or confused. Check if server.js is running.");
+    } finally {
+      setIsLoadingAi(false);
+    }
+  };
+
   const handleToggleLike = async () => {
     if (!currentTrack.url || !currentUser) return;
     const newStatus = !isCurrentTrackLiked;
-    const trackData = {
-      title: currentTrack.title,
-      artist: currentTrack.artist,
-      url: currentTrack.url,
-      cover: currentTrack.cover,
-      id: currentTrack.id,
-      uri: currentTrack.uri,
-    };
+    const trackData = { ...currentTrack };
+
     if (newStatus) setLikedTracks((prev) => [...prev, trackData]);
     else
-      setLikedTracks((prev) =>
-        prev.filter((t) => t.title !== currentTrack.title)
-      );
+      setLikedTracks((prev) => prev.filter((t) => t.title !== trackData.title));
+
     await leaderboardApi.toggleLike(currentUser, trackData, newStatus);
   };
 
-  const playLikedTrack = (track) => {
-    if (!track.url) return;
-    setPlaylist(likedTracks);
-    const index = likedTracks.findIndex((t) => t.title === track.title);
-    setCurrentTrackIndex(index !== -1 ? index : 0);
-    setIsPlaying(true);
-    setActiveView("PLAYLIST");
-  };
-
+  // AUDIO CONTROLS
   useEffect(() => {
     if (playlist.length > 0 && audioRef.current && !isPlaying && !trackToPlay)
       setTimeout(() => setIsPlaying(true), 500);
@@ -416,13 +332,11 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
 
   useEffect(() => {
     if (audioRef.current) {
-      if (isPlaying) {
-        const playPromise = audioRef.current.play();
-        if (playPromise !== undefined)
-          playPromise.catch((error) =>
-            console.log("Autoplay prevented:", error)
-          );
-      } else audioRef.current.pause();
+      if (isPlaying)
+        audioRef.current
+          .play()
+          .catch((e) => console.log("Autoplay blocked", e));
+      else audioRef.current.pause();
     }
   }, [isPlaying, currentTrackIndex]);
 
@@ -433,41 +347,6 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
     }
   };
 
-  const handleVibeSubmit = async (e, overrideInput = null) => {
-    if (e) e.preventDefault();
-    const inputToUse = overrideInput || vibeInput;
-    if (!inputToUse.trim()) return;
-
-    setIsLoadingAi(true);
-    setShowSuggestions(false);
-
-    try {
-      const res = await fetch(`${PROXY_BASE}/api/ai/recommend`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          vibe: inputToUse,
-          userContext: userTasteContext,
-        }),
-      });
-      if (!res.ok) throw new Error("Server error");
-      const data = await res.json();
-      const newTracks = Array.isArray(data) ? data : [data];
-      if (newTracks.length === 0 || !newTracks[0].url)
-        alert("Música encontrada, mas sem preview.");
-      else {
-        setPlaylist((prev) => [...prev, ...newTracks]);
-        setCurrentTrackIndex(playlist.length);
-        setActiveView("PLAYLIST");
-        setVibeInput("");
-      }
-    } catch (error) {
-      alert("A AI não conseguiu encontrar músicas.");
-    } finally {
-      setIsLoadingAi(false);
-    }
-  };
-
   const formatTime = (time) => {
     if (!time) return "00:00";
     const minutes = Math.floor(time / 60);
@@ -475,27 +354,8 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
     return `${minutes}:${seconds.toString().padStart(2, "0")}`;
   };
 
-  const getVolumeIcon = () => {
-    if (volume === 0) return <FaVolumeMute className="text-gray-400 text-xs" />;
-    if (volume < 0.5) return <FaVolumeDown className="text-gray-400 text-xs" />;
-    return <FaVolumeUp className="text-gray-400 text-xs" />;
-  };
-
   return (
     <div className="flex flex-col h-full bg-[#2C3E50] text-white font-sans select-none">
-      {/* --- ESTILO INJETADO PARA FORÇAR REMOÇÃO DO SCROLLBAR --- */}
-      <style>
-        {`
-          .hide-scrollbar::-webkit-scrollbar {
-            display: none;
-          }
-          .hide-scrollbar {
-            -ms-overflow-style: none;  /* IE and Edge */
-            scrollbar-width: none;  /* Firefox */
-          }
-        `}
-      </style>
-
       <audio
         ref={audioRef}
         crossOrigin="anonymous"
@@ -522,29 +382,18 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
           Now Playing
         </button>
         <button
-          onClick={() => setActiveView("LIKED")}
-          className={`flex items-center gap-1 px-2 py-0.5 rounded hover:bg-white/10 ${
-            activeView === "LIKED" ? "text-white font-bold" : "text-gray-300"
-          }`}
-        >
-          <FaHeart
-            className={
-              activeView === "LIKED" ? "text-red-500" : "text-gray-400"
-            }
-          />{" "}
-          Liked
-        </button>
-        <button
           onClick={() => setActiveView("SEARCH")}
           className={`flex items-center gap-1 px-2 py-0.5 rounded hover:bg-white/10 ${
-            activeView === "SEARCH" ? "text-white font-bold" : "text-[#42B638]"
+            activeView === "SEARCH"
+              ? "text-[#42B638] font-bold"
+              : "text-gray-300"
           }`}
         >
           <FaSearch className="text-[10px]" /> Smart DJ
         </button>
       </div>
 
-      {/* PRINCIPAL */}
+      {/* MAIN */}
       <div className="flex-grow flex overflow-hidden bg-[#2C3E50]">
         <div className="flex-1 flex flex-col p-2 bg-gradient-to-b from-[#627390] to-[#2C3E50]">
           <div className="flex-grow relative shadow-xl border border-[#333] bg-black group">
@@ -562,7 +411,6 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
                       ? "text-red-500"
                       : "text-white/50 hover:text-white"
                   }`}
-                  title={isCurrentTrackLiked ? "Unlike" : "Like"}
                 >
                   {isCurrentTrackLiked ? <FaHeart /> : <FaRegHeart />}
                 </button>
@@ -579,180 +427,85 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
 
         <div className="w-56 bg-white text-black border-l-2 border-[#182C68] flex flex-col relative flex-shrink-0">
           {activeView === "PLAYLIST" && (
-            <>
-              <div className="bg-[#E1EAF8] p-1 border-b border-[#9EB6CE] flex justify-between items-center px-2 flex-shrink-0">
-                <span className="text-xs font-bold text-[#182C68]">
-                  Playlist
-                </span>
-                <button
-                  onClick={handleSaveCurrentToSpotify}
-                  disabled={isExporting || !currentTrack.title}
-                  className="flex items-center gap-1 text-[9px] bg-[#1DB954] text-white px-2 py-0.5 rounded hover:bg-[#179443] transition-colors"
-                >
-                  <FaSpotify /> {isExporting ? "Saving..." : "Save Song"}
-                </button>
-              </div>
-              {/* USO DA CLASSE hide-scrollbar AQUI */}
-              <div className="overflow-y-auto flex-grow bg-white hide-scrollbar">
-                {playlist.length === 0 ? (
-                  <div className="p-4 text-center text-xs text-gray-400 mt-10 flex flex-col items-center">
-                    <span>Playlist empty.</span>
-                    <button
-                      onClick={() => setActiveView("SEARCH")}
-                      className="mt-2 text-[#3C7FB1] hover:underline cursor-pointer font-bold"
-                    >
-                      Ask the AI
-                    </button>
-                  </div>
-                ) : (
-                  playlist.map((track, idx) => (
-                    <div
-                      key={`${track.id}-${idx}`}
-                      onClick={() => {
-                        setCurrentTrackIndex(idx);
-                        setIsPlaying(true);
-                      }}
-                      className={`flex items-center gap-2 px-2 py-1.5 text-xs cursor-pointer border-b border-gray-100 transition-colors ${
-                        idx === currentTrackIndex
-                          ? "bg-[#316AC5] text-white"
-                          : "hover:bg-[#F3F3F3]"
-                      }`}
-                    >
-                      <span className="text-[10px] opacity-70 w-4 text-right">
-                        {idx + 1}.
+            <div className="overflow-y-auto flex-grow bg-white">
+              {playlist.length === 0 ? (
+                <div className="p-4 text-center text-xs text-gray-400 mt-10">
+                  Playlist empty.
+                  <br />
+                  Use Smart DJ to add songs.
+                </div>
+              ) : (
+                playlist.map((track, idx) => (
+                  <div
+                    key={`${track.id}-${idx}`}
+                    onClick={() => {
+                      setCurrentTrackIndex(idx);
+                      setIsPlaying(true);
+                    }}
+                    className={`flex items-center gap-2 px-2 py-1.5 text-xs cursor-pointer border-b border-gray-100 ${
+                      idx === currentTrackIndex
+                        ? "bg-[#316AC5] text-white"
+                        : "hover:bg-[#F3F3F3]"
+                    }`}
+                  >
+                    <span className="text-[10px] opacity-70 w-4 text-right">
+                      {idx + 1}.
+                    </span>
+                    <div className="flex flex-col overflow-hidden w-full">
+                      <span className="truncate font-bold">{track.title}</span>
+                      <span
+                        className={`text-[9px] truncate ${
+                          idx === currentTrackIndex
+                            ? "text-blue-100"
+                            : "text-gray-500"
+                        }`}
+                      >
+                        {track.artist}
                       </span>
-                      <div className="flex flex-col overflow-hidden w-full">
-                        <span className="truncate font-bold">
-                          {track.title}
-                        </span>
-                        <span
-                          className={`text-[9px] truncate ${
-                            idx === currentTrackIndex
-                              ? "text-blue-100"
-                              : "text-gray-500"
-                          }`}
-                        >
-                          {track.artist}
-                        </span>
-                      </div>
                     </div>
-                  ))
-                )}
-              </div>
-            </>
-          )}
-
-          {activeView === "LIKED" && (
-            <>
-              <div className="bg-[#E1EAF8] p-1 border-b border-[#9EB6CE] flex justify-between items-center px-2 flex-shrink-0">
-                <span className="text-xs font-bold text-[#182C68] flex items-center gap-1">
-                  <FaHeart className="text-red-500 text-[10px]" /> Favorites
-                </span>
-              </div>
-              <div className="overflow-y-auto flex-grow bg-white hide-scrollbar">
-                {likedTracks.length === 0 ? (
-                  <div className="p-4 text-center text-xs text-gray-400 mt-10">
-                    No liked songs yet.
                   </div>
-                ) : (
-                  likedTracks.map((track, idx) => (
-                    <div
-                      key={idx}
-                      onClick={() => playLikedTrack(track)}
-                      className="flex items-center gap-2 px-2 py-1.5 text-xs cursor-pointer border-b border-gray-100 hover:bg-[#F3F3F3] transition-colors group"
-                    >
-                      <FaHeart className="text-red-500 text-[10px] flex-shrink-0 opacity-80" />
-                      <div className="flex flex-col overflow-hidden w-full">
-                        <span className="truncate font-bold text-gray-800">
-                          {track.title}
-                        </span>
-                        <span className="text-[9px] truncate text-gray-500">
-                          {track.artist}
-                        </span>
-                      </div>
-                      <FaPlay className="text-[#3C7FB1] text-[8px] opacity-0 group-hover:opacity-100 ml-1" />
-                    </div>
-                  ))
-                )}
-              </div>
-            </>
+                ))
+              )}
+            </div>
           )}
 
           {activeView === "SEARCH" && (
             <div className="flex flex-col h-full bg-[#F0F0F0] relative">
               <div className="bg-[#2C3E50] p-2 text-white text-xs font-bold flex items-center gap-2 shadow-md">
                 <FaSearch className="text-[#42B638]" />
-                <span>Smart DJ</span>
+                <span>Smart DJ (AI)</span>
               </div>
-
               <div className="p-4 flex flex-col gap-3">
                 <label className="text-xs text-gray-600 font-bold">
-                  Type a song or vibe:
+                  Describe your vibe:
                 </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={vibeInput}
-                    onChange={(e) => {
-                      setVibeInput(e.target.value);
-                      setShowSuggestions(true);
-                    }}
-                    placeholder="Ex: Late night jazz, Mac Miller - Self Care..."
-                    className="w-full p-2 text-xs border-2 border-[#7F9DB9] rounded-sm focus:border-[#3C7FB1] outline-none shadow-inner font-sans"
-                  />
-                  {showSuggestions && suggestions.length > 0 && (
-                    <div className="absolute top-full left-0 w-full bg-white border border-[#7F9DB9] shadow-lg z-50 max-h-40 overflow-y-auto hide-scrollbar">
-                      {suggestions.map((s) => (
-                        <div
-                          key={s.id}
-                          onClick={() => handleSelectSuggestion(s)}
-                          className="flex items-center gap-2 p-2 hover:bg-[#316AC5] hover:text-white cursor-pointer border-b border-gray-100 text-xs"
-                        >
-                          <img
-                            src={s.image}
-                            alt=""
-                            className="w-6 h-6 object-cover"
-                          />
-                          <div className="flex flex-col truncate">
-                            <span className="font-bold truncate">{s.name}</span>
-                            <span className="text-[10px] opacity-80 truncate">
-                              {s.artist}
-                            </span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <input
+                  type="text"
+                  value={vibeInput}
+                  onChange={(e) => setVibeInput(e.target.value)}
+                  placeholder="e.g., Sad piano for rainy day..."
+                  className="w-full p-2 text-xs border-2 border-[#7F9DB9] rounded-sm focus:border-[#3C7FB1] outline-none shadow-inner"
+                />
 
                 {!spotifyToken ? (
                   <button
-                    onClick={() => connectSpotify(fetchUserTopArtists)}
-                    className="text-xs flex items-center justify-center gap-2 bg-[#191414] text-white py-1.5 px-2 rounded hover:bg-[#1DB954] transition-colors shadow-sm"
+                    onClick={() => connectSpotify()}
+                    className="text-xs flex items-center justify-center gap-2 bg-[#191414] text-white py-1.5 px-2 rounded hover:bg-[#1DB954] transition-colors shadow-sm mt-2"
                   >
-                    <FaSpotify size={14} /> Connect Spotify
+                    <FaSpotify size={14} /> Login Spotify (Required)
                   </button>
                 ) : (
-                  <div className="text-[9px] text-green-700 bg-green-100 p-1 border border-green-300 rounded flex items-center gap-1 justify-center">
-                    <FaSpotify /> <span>Spotify Linked</span>
+                  <div className="text-[9px] text-green-700 bg-green-100 p-1 border border-green-300 rounded flex items-center gap-1 justify-center mt-2">
+                    <FaSpotify /> <span>Spotify Connected</span>
                   </div>
                 )}
 
                 <button
-                  onClick={(e) => handleVibeSubmit(e)}
+                  onClick={handleVibeSubmit}
                   disabled={isLoadingAi || !vibeInput.trim()}
                   className="bg-[#3C7FB1] text-white px-3 py-2 rounded-sm text-xs font-bold shadow-md active:translate-y-[1px] disabled:opacity-50 hover:bg-[#2C5F85] transition-colors flex items-center justify-center gap-2 mt-2"
                 >
-                  {isLoadingAi ? (
-                    <>
-                      <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      Generating...
-                    </>
-                  ) : (
-                    <>
-                      <FaMusic /> Generate Playlist
-                    </>
-                  )}
+                  {isLoadingAi ? "Generating..." : "Generate Playlist"}
                 </button>
               </div>
             </div>
@@ -760,7 +513,7 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
         </div>
       </div>
 
-      {/* RODAPÉ */}
+      {/* FOOTER */}
       <div className="h-16 bg-gradient-to-b from-[#6B7D94] via-[#405168] to-[#2C3E50] border-t border-[#8FA0B5] flex flex-col px-3 pb-1 relative shadow-[0_-2px_5px_rgba(0,0,0,0.3)] z-20 flex-shrink-0">
         <div className="w-full flex items-center gap-2 mb-1 mt-1">
           <span className="text-[9px] w-8 text-right font-mono text-[#42B638]">
@@ -781,7 +534,6 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
             {formatTime(duration)}
           </span>
         </div>
-
         <div className="flex items-center justify-center gap-5 pb-1 relative">
           <button
             onClick={() => {
@@ -802,10 +554,12 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
               <FaPlay className="text-[#182C68] text-lg ml-1" />
             )}
           </button>
-
-          {/* SLIDER DE VOLUME FUNCIONAL */}
           <div className="flex items-center gap-2 absolute right-0 bottom-1">
-            {getVolumeIcon()}
+            {volume === 0 ? (
+              <FaVolumeMute className="text-gray-400 text-xs" />
+            ) : (
+              <FaVolumeUp className="text-gray-400 text-xs" />
+            )}
             <input
               type="range"
               min="0"
@@ -814,7 +568,6 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
               value={volume}
               onChange={(e) => setVolume(parseFloat(e.target.value))}
               className="w-16 h-1.5 bg-black rounded-full appearance-none cursor-pointer accent-[#42B638] border border-[#555]"
-              title={`Volume: ${Math.round(volume * 100)}%`}
             />
           </div>
         </div>

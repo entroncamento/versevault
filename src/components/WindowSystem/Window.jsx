@@ -1,7 +1,51 @@
-import React, { useRef, useEffect } from "react";
+import React, { useRef, useEffect, Suspense } from "react";
 import { useWindowManager } from "../../contexts/WindowManagerContext";
 import WindowControls from "./WindowControls";
 
+// --- COMPONENTE DE SEGURANÇA (ERROR BOUNDARY) ---
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error("Window Crashed:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="h-full flex flex-col items-center justify-center bg-[#ECE9D8] text-red-600 p-4 text-center font-sans select-none">
+          <img
+            src="/icons/doctor_watson.png"
+            className="w-12 h-12 mb-2"
+            onError={(e) => (e.target.style.display = "none")}
+            alt="Error"
+          />
+          <p className="font-bold text-sm">Program Error</p>
+          <p className="text-xs mt-1">
+            The application has encountered a problem and needs to close.
+          </p>
+          <button
+            onClick={() => this.setState({ hasError: false })}
+            className="mt-4 px-3 py-1 bg-[#F0F0F0] border border-[#003C74] rounded-[3px] text-xs hover:bg-white shadow-sm active:translate-y-px"
+          >
+            Restart App
+          </button>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+// --- COMPONENTE JANELA ---
 const Window = ({
   id,
   title,
@@ -127,7 +171,18 @@ const Window = ({
 
       <div className="flex-grow bg-white relative overflow-hidden flex flex-col">
         <div className="flex-grow overflow-auto p-0">
-          <ContentComponent windowId={id} {...props} />
+          {/* PROTEÇÃO: ErrorBoundary + Suspense */}
+          <ErrorBoundary>
+            <Suspense
+              fallback={
+                <div className="h-full flex items-center justify-center bg-[#ECE9D8]">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#003399]"></div>
+                </div>
+              }
+            >
+              <ContentComponent windowId={id} {...props} />
+            </Suspense>
+          </ErrorBoundary>
         </div>
       </div>
     </div>
