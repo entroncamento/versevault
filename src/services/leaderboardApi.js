@@ -13,7 +13,6 @@ import {
   increment,
   serverTimestamp,
   arrayUnion,
-  arrayRemove,
 } from "firebase/firestore";
 import { app } from "../firebase";
 
@@ -61,24 +60,39 @@ export const leaderboardApi = {
     if (!user) return;
     const userRef = doc(db, "leaderboard", user.uid);
 
-    // CORREÇÃO: Adicionado 'uri' para permitir exportação para Spotify
-    const trackData = {
-      title: track.title,
-      artist: track.artist,
-      url: track.url || "",
-      cover: track.cover || "",
-      id: track.id || "",
-      uri: track.uri || "", // <--- O FUNDAMENTAL ESTÁ AQUI
-    };
-
     try {
-      await setDoc(
-        userRef,
-        {
-          likedTracks: isLiked ? arrayUnion(trackData) : arrayRemove(trackData),
-        },
-        { merge: true }
-      );
+      const docSnap = await getDoc(userRef);
+      if (!docSnap.exists()) return false;
+
+      let currentLiked = docSnap.data().likedTracks || [];
+
+      if (isLiked) {
+        const newTrack = {
+          title: track.title,
+          artist: track.artist,
+          url: track.url || "",
+          cover: track.cover || "",
+          id: track.id || "",
+          uri: track.uri || "",
+        };
+
+        const exists = currentLiked.some(
+          (t) =>
+            (t.id && newTrack.id && t.id === newTrack.id) ||
+            (t.title === newTrack.title && t.artist === newTrack.artist)
+        );
+
+        if (!exists) {
+          currentLiked.push(newTrack);
+        }
+      } else {
+        currentLiked = currentLiked.filter((t) => {
+          if (t.id && track.id) return t.id !== track.id;
+          return !(t.title === track.title && t.artist === track.artist);
+        });
+      }
+
+      await setDoc(userRef, { likedTracks: currentLiked }, { merge: true });
       return true;
     } catch (error) {
       console.error("Erro toggle like:", error);
@@ -86,23 +100,65 @@ export const leaderboardApi = {
     }
   },
 
-  async recordDailyDropWin(user) {
+  // --- NOVA FUNÇÃO PARA APAGAR EM MASSA (BULK DELETE) ---
+  async deleteItems(user, folderIds = [], tracks = []) {
     if (!user) return;
     const userRef = doc(db, "leaderboard", user.uid);
 
     try {
+      const docSnap = await getDoc(userRef);
+      if (!docSnap.exists()) return false;
+
+      const data = docSnap.data();
+      let currentFolders = data.folders || [];
+      let currentLiked = data.likedTracks || [];
+
+      // 1. Remover Pastas (Filtra todas as que estão na lista para apagar)
+      if (folderIds.length > 0) {
+        currentFolders = currentFolders.filter(
+          (f) => !folderIds.includes(f.id)
+        );
+      }
+
+      // 2. Remover Músicas (Filtra todas as que correspondem)
+      if (tracks.length > 0) {
+        currentLiked = currentLiked.filter((t) => {
+          // Verifica se a música atual (t) está na lista de remoção
+          const match = tracks.some((trackToRemove) => {
+            if (t.id && trackToRemove.id) return t.id === trackToRemove.id;
+            return (
+              t.title === trackToRemove.title &&
+              t.artist === trackToRemove.artist
+            );
+          });
+          return !match; // Mantém se NÃO houver match
+        });
+      }
+
+      // Grava tudo de uma vez
       await setDoc(
         userRef,
-        {
-          username: user.displayName || user.email.split("@")[0],
-          photoURL: user.photoURL || "/icons/Minesweeper.ico",
-          dailyDropsCompleted: increment(1),
-        },
+        { folders: currentFolders, likedTracks: currentLiked },
         { merge: true }
       );
       return true;
     } catch (error) {
-      console.error("Erro ao registrar Daily Drop:", error);
+      console.error("Erro deleteItems:", error);
+      return false;
+    }
+  },
+
+  async recordDailyDropWin(user) {
+    if (!user) return;
+    const userRef = doc(db, "leaderboard", user.uid);
+    try {
+      await setDoc(
+        userRef,
+        { dailyDropsCompleted: increment(1) },
+        { merge: true }
+      );
+      return true;
+    } catch (error) {
       return false;
     }
   },
@@ -144,7 +200,6 @@ export const leaderboardApi = {
       const snapshot = await getCountFromServer(q);
       return snapshot.data().count + 1;
     } catch (error) {
-      console.error("Erro rank stat:", error);
       return null;
     }
   },
@@ -167,28 +222,18 @@ export const leaderboardApi = {
     }
   },
 
-  // --- NOVAS FUNÇÕES PARA O MY DOCUMENTS ---
-
   async createFolder(user, folderName) {
     if (!user || !folderName) return;
     const userRef = doc(db, "leaderboard", user.uid);
-    const newFolder = {
-      id: crypto.randomUUID(), // Gera ID único (Nativo do browser)
-      name: folderName,
-      tracks: [], // Array de IDs ou Track Objects
-    };
-
+    const newFolder = { id: crypto.randomUUID(), name: folderName, tracks: [] };
     try {
       await setDoc(
         userRef,
-        {
-          folders: arrayUnion(newFolder),
-        },
+        { folders: arrayUnion(newFolder) },
         { merge: true }
       );
       return true;
     } catch (e) {
-      console.error("Erro criar pasta:", e);
       return false;
     }
   },
@@ -197,45 +242,18 @@ export const leaderboardApi = {
     const userRef = doc(db, "leaderboard", user.uid);
     const docSnap = await getDoc(userRef);
     if (!docSnap.exists()) return;
-
     const data = docSnap.data();
     const folders = data.folders || [];
-
-    const targetFolderIndex = folders.findIndex((f) => f.id === folder.id);
-    if (targetFolderIndex === -1) return;
-
-    // Adiciona track se não existir
-    const trackExists = folders[targetFolderIndex].tracks.some(
-      (t) => t.title === track.title
-    );
-    if (!trackExists) {
-      folders[targetFolderIndex].tracks.push(track);
+    const targetIndex = folders.findIndex((f) => f.id === folder.id);
+    if (targetIndex === -1) return;
+    if (!folders[targetIndex].tracks.some((t) => t.title === track.title)) {
+      folders[targetIndex].tracks.push(track);
       await setDoc(userRef, { folders }, { merge: true });
     }
   },
 
-  // --- NOVO: REMOVER PASTA ---
   async deleteFolder(user, folderId) {
-    if (!user || !folderId) return;
-
-    const userRef = doc(db, "leaderboard", user.uid);
-    const docSnap = await getDoc(userRef);
-
-    if (!docSnap.exists()) return false;
-
-    const data = docSnap.data();
-    const folders = data.folders || [];
-
-    // Filtra o array, removendo o objeto da pasta que corresponde ao folderId
-    const updatedFolders = folders.filter((f) => f.id !== folderId);
-
-    try {
-      // Atualiza o documento no Firestore com o novo array de pastas
-      await setDoc(userRef, { folders: updatedFolders }, { merge: true });
-      return true;
-    } catch (e) {
-      console.error("Erro ao apagar pasta:", e);
-      return false;
-    }
+    // Mantemos esta para compatibilidade, mas o deleteItems faz o mesmo
+    return this.deleteItems(user, [folderId], []);
   },
 };

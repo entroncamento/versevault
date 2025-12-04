@@ -5,14 +5,12 @@ import {
   FaStop,
   FaVolumeUp,
   FaVolumeMute,
-  FaVolumeDown,
   FaSearch,
-  FaMusic,
   FaHeart,
   FaRegHeart,
   FaChevronLeft,
   FaChevronRight,
-  FaSpotify,
+  FaMusic,
 } from "react-icons/fa";
 import { useWindowManager } from "../contexts/WindowManagerContext";
 import { useAuth } from "../contexts/AuthContext";
@@ -21,7 +19,7 @@ import { leaderboardApi } from "../services/leaderboardApi";
 // Usa o proxy ou localhost direto
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
 
-// --- VISUALIZADOR CANVAS (MANTIDO) ---
+// --- VISUALIZADOR CANVAS (MANTIDO IGUAL) ---
 const CanvasVisualizer = ({ audioRef, isPlaying, cover }) => {
   const canvasRef = useRef(null);
   const [visMode, setVisMode] = useState(0);
@@ -90,10 +88,9 @@ const CanvasVisualizer = ({ audioRef, isPlaying, cover }) => {
 
       if (visMode === 0) {
         const barWidth = (width / bufferLength) * 2.5;
-        let barHeight;
         let x = 0;
         for (let i = 0; i < bufferLength; i++) {
-          barHeight = (dataArray[i] / 255) * height;
+          const barHeight = (dataArray[i] / 255) * height;
           const gradient = ctx.createLinearGradient(
             0,
             height - barHeight,
@@ -193,9 +190,8 @@ const CanvasVisualizer = ({ audioRef, isPlaying, cover }) => {
   );
 };
 
-// --- COMPONENTE PRINCIPAL ---
+// --- COMPONENTE PRINCIPAL (ATUALIZADO) ---
 const MediaPlayerApp = ({ windowId, trackToPlay }) => {
-  const { closeWindow } = useWindowManager();
   const { currentUser } = useAuth();
   const audioRef = useRef(null);
 
@@ -211,7 +207,6 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
   const [isLoadingAi, setIsLoadingAi] = useState(false);
   const [userTasteContext, setUserTasteContext] = useState("");
   const [likedTracks, setLikedTracks] = useState([]);
-  const [spotifyToken, setSpotifyToken] = useState(null);
 
   const currentTrack = playlist[currentTrackIndex] || {
     title: "No Media",
@@ -235,25 +230,7 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
     }
   }, [trackToPlay]);
 
-  // LOGIN SPOTIFY
-  const connectSpotify = (onSuccess) => {
-    const popup = window.open(
-      `http://127.0.0.1:3001/api/spotify/login`, // <--- Força este URL
-      "Spotify Login",
-      "width=500,height=600"
-    );
-    const receiveMessage = async (event) => {
-      if (event.data.type === "SPOTIFY_TOKEN") {
-        const token = event.data.token;
-        setSpotifyToken(token);
-        if (onSuccess) onSuccess(token);
-        window.removeEventListener("message", receiveMessage);
-      }
-    };
-    window.addEventListener("message", receiveMessage, false);
-  };
-
-  // LOAD USER TASTE
+  // LOAD USER TASTE (Contexto para a AI)
   useEffect(() => {
     const loadUserTaste = async () => {
       if (currentUser?.uid) {
@@ -275,14 +252,13 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
     loadUserTaste();
   }, [currentUser]);
 
-  // HANDLE AI DJ SUBMIT
+  // HANDLE AI DJ SUBMIT (Sem Tokens!)
   const handleVibeSubmit = async (e) => {
     if (e) e.preventDefault();
     if (!vibeInput.trim()) return;
 
     setIsLoadingAi(true);
     try {
-      // CHAMADA AO SERVIDOR (Backend faz a magia com a Groq)
       const res = await fetch(`${API_URL}/api/ai/recommend`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -300,13 +276,20 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
         alert("No tracks found with preview audio.");
       } else {
         setPlaylist((prev) => [...prev, ...newTracks]);
-        setCurrentTrackIndex(playlist.length); // Toca a primeira da nova leva
+        // Se a playlist estava vazia, começa a tocar logo
+        if (playlist.length === 0) {
+          setCurrentTrackIndex(0);
+          setTimeout(() => setIsPlaying(true), 500);
+        } else {
+          // Se já tinha músicas, adiciona ao fim e toca a primeira nova
+          setCurrentTrackIndex(playlist.length);
+        }
         setActiveView("PLAYLIST");
         setVibeInput("");
       }
     } catch (error) {
       console.error("AI Error:", error);
-      alert("AI DJ is offline or confused. Check if server.js is running.");
+      alert("AI DJ is offline. Check if server.js is running.");
     } finally {
       setIsLoadingAi(false);
     }
@@ -325,11 +308,6 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
   };
 
   // AUDIO CONTROLS
-  useEffect(() => {
-    if (playlist.length > 0 && audioRef.current && !isPlaying && !trackToPlay)
-      setTimeout(() => setIsPlaying(true), 500);
-  }, [playlist]);
-
   useEffect(() => {
     if (audioRef.current) {
       if (isPlaying)
@@ -477,35 +455,31 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
               </div>
               <div className="p-4 flex flex-col gap-3">
                 <label className="text-xs text-gray-600 font-bold">
-                  Describe your vibe:
+                  I want to listen to...
                 </label>
                 <input
                   type="text"
                   value={vibeInput}
                   onChange={(e) => setVibeInput(e.target.value)}
-                  placeholder="e.g., Sad piano for rainy day..."
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleVibeSubmit(e);
+                  }}
+                  placeholder="e.g., Yoshi City Yung Lean"
                   className="w-full p-2 text-xs border-2 border-[#7F9DB9] rounded-sm focus:border-[#3C7FB1] outline-none shadow-inner"
                 />
 
-                {!spotifyToken ? (
-                  <button
-                    onClick={() => connectSpotify()}
-                    className="text-xs flex items-center justify-center gap-2 bg-[#191414] text-white py-1.5 px-2 rounded hover:bg-[#1DB954] transition-colors shadow-sm mt-2"
-                  >
-                    <FaSpotify size={14} /> Login Spotify (Required)
-                  </button>
-                ) : (
-                  <div className="text-[9px] text-green-700 bg-green-100 p-1 border border-green-300 rounded flex items-center gap-1 justify-center mt-2">
-                    <FaSpotify /> <span>Spotify Connected</span>
-                  </div>
-                )}
+                <div className="text-[10px] text-gray-500 bg-yellow-50 p-2 border border-yellow-200 rounded">
+                  <strong>Tip:</strong> Be specific! <br />
+                  "Songs like Yoshi City" <br />
+                  "80s Japanese City Pop"
+                </div>
 
                 <button
                   onClick={handleVibeSubmit}
                   disabled={isLoadingAi || !vibeInput.trim()}
                   className="bg-[#3C7FB1] text-white px-3 py-2 rounded-sm text-xs font-bold shadow-md active:translate-y-[1px] disabled:opacity-50 hover:bg-[#2C5F85] transition-colors flex items-center justify-center gap-2 mt-2"
                 >
-                  {isLoadingAi ? "Generating..." : "Generate Playlist"}
+                  {isLoadingAi ? "Thinking..." : "Generate Playlist"}
                 </button>
               </div>
             </div>
