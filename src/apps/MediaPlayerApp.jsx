@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import ReactPlayer from "react-player";
 import {
   FaPlay,
   FaPause,
@@ -10,62 +11,44 @@ import {
   FaRegHeart,
   FaChevronLeft,
   FaChevronRight,
-  FaMusic,
+  FaExclamationTriangle,
 } from "react-icons/fa";
-import { useWindowManager } from "../contexts/WindowManagerContext";
 import { useAuth } from "../contexts/AuthContext";
 import { leaderboardApi } from "../services/leaderboardApi";
 
-// Usa o proxy ou localhost direto
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
 
-// --- VISUALIZADOR CANVAS (MANTIDO IGUAL) ---
-const CanvasVisualizer = ({ audioRef, isPlaying, cover }) => {
+// --- HELPER PARA CORRIGIR TEXTOS ---
+const decodeHtml = (html) => {
+  if (!html) return "";
+  const txt = document.createElement("textarea");
+  txt.innerHTML = html;
+  return txt.value;
+};
+
+// --- VISUALIZADOR ---
+const CanvasVisualizer = ({ audioRef, isPlaying, cover, isYouTube }) => {
   const canvasRef = useRef(null);
   const [visMode, setVisMode] = useState(0);
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
-  const sourceRef = useRef(null);
   const animationRef = useRef(null);
   const MODES = ["SPECTRUM", "OSCILLOSCOPE", "VORTEX"];
 
   useEffect(() => {
-    if (!audioRef.current) return;
+    if (isYouTube) return;
     const initAudio = () => {
       if (!audioContextRef.current) {
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         audioContextRef.current = new AudioContext();
       }
-      const ctx = audioContextRef.current;
-      if (!analyserRef.current) {
-        const analyser = ctx.createAnalyser();
-        analyser.fftSize = 256;
-        analyser.smoothingTimeConstant = 0.8;
-        analyserRef.current = analyser;
-      }
-      if (!sourceRef.current) {
-        try {
-          const source = ctx.createMediaElementSource(audioRef.current);
-          source.connect(analyserRef.current);
-          analyserRef.current.connect(ctx.destination);
-          sourceRef.current = source;
-        } catch (e) {}
-      }
     };
     initAudio();
-    return () => {
-      if (animationRef.current) cancelAnimationFrame(animationRef.current);
-    };
-  }, [audioRef]);
+  }, [isYouTube]);
 
   useEffect(() => {
-    if (!isPlaying || !analyserRef.current || !canvasRef.current) {
+    if (!isPlaying || !canvasRef.current) {
       if (animationRef.current) cancelAnimationFrame(animationRef.current);
-      const canvas = canvasRef.current;
-      if (canvas) {
-        const ctx = canvas.getContext("2d");
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-      }
       return;
     }
     const canvas = canvasRef.current;
@@ -73,8 +56,8 @@ const CanvasVisualizer = ({ audioRef, isPlaying, cover }) => {
     const analyser = analyserRef.current;
     canvas.width = canvas.offsetWidth;
     canvas.height = canvas.offsetHeight;
-    const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
+
+    let simulatedData = new Uint8Array(64);
 
     const renderFrame = () => {
       if (!isPlaying) return;
@@ -83,23 +66,26 @@ const CanvasVisualizer = ({ audioRef, isPlaying, cover }) => {
       const height = canvas.height;
       ctx.clearRect(0, 0, width, height);
 
-      if (visMode !== 1) analyser.getByteFrequencyData(dataArray);
-      else analyser.getByteTimeDomainData(dataArray);
+      let dataArray;
+      let bufferLength;
+
+      if (isYouTube || !analyser) {
+        bufferLength = 64;
+        dataArray = simulatedData.map((_, i) => {
+          const time = Date.now() / 1000;
+          return 128 + Math.sin(time * 10 + i * 0.5) * 50 + Math.random() * 20;
+        });
+      } else {
+        bufferLength = 64;
+        dataArray = simulatedData.map((_, i) => 128);
+      }
 
       if (visMode === 0) {
-        const barWidth = (width / bufferLength) * 2.5;
+        const barWidth = (width / bufferLength) * 2;
         let x = 0;
         for (let i = 0; i < bufferLength; i++) {
           const barHeight = (dataArray[i] / 255) * height;
-          const gradient = ctx.createLinearGradient(
-            0,
-            height - barHeight,
-            0,
-            height
-          );
-          gradient.addColorStop(0, "#aaffaa");
-          gradient.addColorStop(1, "#005500");
-          ctx.fillStyle = gradient;
+          ctx.fillStyle = `rgb(50, ${150 + dataArray[i] / 2}, 50)`;
           ctx.fillRect(x, height - barHeight, barWidth, barHeight);
           x += barWidth + 1;
         }
@@ -121,13 +107,13 @@ const CanvasVisualizer = ({ audioRef, isPlaying, cover }) => {
       } else if (visMode === 2) {
         const centerX = width / 2;
         const centerY = height / 2;
-        const radius = Math.min(width, height) / 3;
+        const radius = Math.min(width, height) / 4;
         ctx.beginPath();
         ctx.strokeStyle = "#42B638";
         ctx.lineWidth = 2;
         for (let i = 0; i < bufferLength; i++) {
-          const rad = Math.PI * 2 * (i / bufferLength);
-          const barHeight = (dataArray[i] / 255) * 50;
+          const rad = (Math.PI * 2 * i) / bufferLength;
+          const barHeight = (dataArray[i] / 255) * 40;
           const x1 = centerX + Math.cos(rad) * radius;
           const y1 = centerY + Math.sin(rad) * radius;
           const x2 = centerX + Math.cos(rad) * (radius + barHeight);
@@ -138,10 +124,8 @@ const CanvasVisualizer = ({ audioRef, isPlaying, cover }) => {
         ctx.stroke();
       }
     };
-    if (audioContextRef.current?.state === "suspended")
-      audioContextRef.current.resume();
     renderFrame();
-  }, [isPlaying, visMode]);
+  }, [isPlaying, visMode, isYouTube]);
 
   const nextMode = () => setVisMode((prev) => (prev + 1) % MODES.length);
   const prevMode = () =>
@@ -150,10 +134,10 @@ const CanvasVisualizer = ({ audioRef, isPlaying, cover }) => {
   return (
     <div className="w-full h-full bg-black flex items-center justify-center overflow-hidden border-2 border-[#596878] shadow-inner relative group">
       {cover && (
-        <div className="absolute inset-0 flex items-center justify-center opacity-20 pointer-events-none transition-opacity duration-500">
+        <div className="absolute inset-0 flex items-center justify-center opacity-40 pointer-events-none">
           <img
             src={cover}
-            className="h-full object-cover w-full blur-lg"
+            className="h-full w-full object-cover blur-md scale-110"
             alt="Cover"
           />
         </div>
@@ -172,16 +156,16 @@ const CanvasVisualizer = ({ audioRef, isPlaying, cover }) => {
       <div className="absolute top-2 left-0 right-0 px-2 flex justify-between items-start z-30 opacity-0 group-hover:opacity-100 transition-opacity">
         <button
           onClick={prevMode}
-          className="text-white/50 hover:text-white p-1 bg-black/20 rounded backdrop-blur-sm"
+          className="text-white/50 hover:text-white p-1 bg-black/40 rounded"
         >
           <FaChevronLeft size={10} />
         </button>
-        <span className="text-[9px] text-white/80 font-mono uppercase tracking-widest bg-black/40 px-2 rounded backdrop-blur-sm border border-white/10">
-          {MODES[visMode]}
+        <span className="text-[9px] text-white/80 font-mono uppercase tracking-widest bg-black/40 px-2 rounded border border-white/10">
+          {MODES[visMode]} {isYouTube ? "(SIM)" : ""}
         </span>
         <button
           onClick={nextMode}
-          className="text-white/50 hover:text-white p-1 bg-black/20 rounded backdrop-blur-sm"
+          className="text-white/50 hover:text-white p-1 bg-black/40 rounded"
         >
           <FaChevronRight size={10} />
         </button>
@@ -190,10 +174,10 @@ const CanvasVisualizer = ({ audioRef, isPlaying, cover }) => {
   );
 };
 
-// --- COMPONENTE PRINCIPAL (ATUALIZADO) ---
+// --- COMPONENTE PRINCIPAL ---
 const MediaPlayerApp = ({ windowId, trackToPlay }) => {
   const { currentUser } = useAuth();
-  const audioRef = useRef(null);
+  const playerRef = useRef(null);
 
   const [playlist, setPlaylist] = useState([]);
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
@@ -201,58 +185,67 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(0.5);
+  const [hasError, setHasError] = useState(false); // Estado de erro
 
   const [activeView, setActiveView] = useState("PLAYLIST");
   const [vibeInput, setVibeInput] = useState("");
   const [isLoadingAi, setIsLoadingAi] = useState(false);
-  const [userTasteContext, setUserTasteContext] = useState("");
   const [likedTracks, setLikedTracks] = useState([]);
+  const [userTasteContext, setUserTasteContext] = useState("");
 
   const currentTrack = playlist[currentTrackIndex] || {
     title: "No Media",
     artist: "Waiting for input...",
+    source: "local",
   };
 
   const isCurrentTrackLiked = likedTracks.some(
     (t) => t.title === currentTrack.title && t.artist === currentTrack.artist
   );
 
-  useEffect(() => {
-    if (audioRef.current) audioRef.current.volume = volume;
-  }, [volume]);
+  const getTrackUrl = (track) => {
+    if (!track) return null;
+    if (track.source === "youtube" && track.videoId) {
+      return `https://www.youtube.com/watch?v=${track.videoId}`;
+    }
+    return track.url;
+  };
 
   useEffect(() => {
     if (trackToPlay) {
       setPlaylist([trackToPlay]);
       setCurrentTrackIndex(0);
       setActiveView("PLAYLIST");
-      setTimeout(() => setIsPlaying(true), 100);
+      setIsPlaying(true);
+      setHasError(false);
     }
   }, [trackToPlay]);
 
-  // LOAD USER TASTE (Contexto para a AI)
+  // Reset de erro ao mudar de música
+  useEffect(() => {
+    setHasError(false);
+    setDuration(0);
+  }, [currentTrackIndex]);
+
   useEffect(() => {
     const loadUserTaste = async () => {
       if (currentUser?.uid) {
         try {
           const stats = await leaderboardApi.getUserStats(currentUser.uid);
-          let contextString = "";
           if (stats?.likedTracks) {
             setLikedTracks(stats.likedTracks);
             const likedNames = stats.likedTracks
               .slice(0, 5)
               .map((t) => `${t.title} by ${t.artist}`)
               .join(", ");
-            if (likedNames) contextString += `User likes: ${likedNames}. `;
+            if (likedNames) setUserTasteContext(`User likes: ${likedNames}. `);
           }
-          if (contextString) setUserTasteContext(contextString);
         } catch (e) {}
       }
     };
     loadUserTaste();
   }, [currentUser]);
 
-  // HANDLE AI DJ SUBMIT (Sem Tokens!)
   const handleVibeSubmit = async (e) => {
     if (e) e.preventDefault();
     if (!vibeInput.trim()) return;
@@ -270,33 +263,28 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
 
       if (!res.ok) throw new Error("Server error");
       const data = await res.json();
-
       const newTracks = Array.isArray(data) ? data : [data];
+
       if (newTracks.length === 0) {
-        alert("No tracks found with preview audio.");
+        alert("No tracks found.");
       } else {
+        const startIdx = playlist.length;
         setPlaylist((prev) => [...prev, ...newTracks]);
-        // Se a playlist estava vazia, começa a tocar logo
-        if (playlist.length === 0) {
-          setCurrentTrackIndex(0);
-          setTimeout(() => setIsPlaying(true), 500);
-        } else {
-          // Se já tinha músicas, adiciona ao fim e toca a primeira nova
-          setCurrentTrackIndex(playlist.length);
-        }
+        setCurrentTrackIndex(startIdx === 0 ? 0 : startIdx);
+        setIsPlaying(true);
         setActiveView("PLAYLIST");
         setVibeInput("");
       }
     } catch (error) {
       console.error("AI Error:", error);
-      alert("AI DJ is offline. Check if server.js is running.");
+      alert("AI DJ is offline.");
     } finally {
       setIsLoadingAi(false);
     }
   };
 
   const handleToggleLike = async () => {
-    if (!currentTrack.url || !currentUser) return;
+    if (!currentUser) return;
     const newStatus = !isCurrentTrackLiked;
     const trackData = { ...currentTrack };
 
@@ -307,47 +295,52 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
     await leaderboardApi.toggleLike(currentUser, trackData, newStatus);
   };
 
-  // AUDIO CONTROLS
-  useEffect(() => {
-    if (audioRef.current) {
-      if (isPlaying)
-        audioRef.current
-          .play()
-          .catch((e) => console.log("Autoplay blocked", e));
-      else audioRef.current.pause();
-    }
-  }, [isPlaying, currentTrackIndex]);
-
-  const handleTimeUpdate = () => {
-    if (audioRef.current) {
-      setCurrentTime(audioRef.current.currentTime);
-      setDuration(audioRef.current.duration || 0);
-    }
-  };
-
-  const formatTime = (time) => {
-    if (!time) return "00:00";
-    const minutes = Math.floor(time / 60);
-    const seconds = Math.floor(time % 60);
-    return `${minutes}:${seconds.toString().padStart(2, "0")}`;
-  };
-
   return (
-    <div className="flex flex-col h-full bg-[#2C3E50] text-white font-sans select-none">
-      <audio
-        ref={audioRef}
-        crossOrigin="anonymous"
-        src={currentTrack?.url}
-        onTimeUpdate={handleTimeUpdate}
-        onEnded={() => {
-          if (currentTrackIndex < playlist.length - 1)
-            setCurrentTrackIndex((prev) => prev + 1);
-          else setIsPlaying(false);
-        }}
-      />
+    <div className="flex flex-col h-full bg-[#2C3E50] text-white font-sans select-none overflow-hidden">
+      {/* PLAYER OFF-SCREEN 
+          Usamos 'key' para forçar o React a destruir e recriar o player a cada música nova.
+          Isso resolve o bug de duração 0:00 no YouTube.
+      */}
+      <div className="fixed top-0 left-[-9999px] w-64 h-64 opacity-0 pointer-events-none z-0">
+        <ReactPlayer
+          key={getTrackUrl(currentTrack) || "no-track"} // O TRUQUE MÁGICO
+          ref={playerRef}
+          url={getTrackUrl(currentTrack)}
+          playing={isPlaying}
+          volume={volume}
+          muted={false} // Garante som
+          width="100%"
+          height="100%"
+          onProgress={(state) => setCurrentTime(state.playedSeconds)}
+          onDuration={(dur) => setDuration(dur)}
+          onEnded={() => {
+            if (currentTrackIndex < playlist.length - 1)
+              setCurrentTrackIndex((prev) => prev + 1);
+            else setIsPlaying(false);
+          }}
+          onError={(e) => {
+            console.error("Player Error:", e);
+            setHasError(true);
+          }}
+          config={{
+            youtube: {
+              playerVars: {
+                showinfo: 0,
+                controls: 0,
+                disablekb: 1, // Desativa atalhos de teclado do YT
+                fs: 0,
+                iv_load_policy: 3,
+                playsinline: 1, // Ajuda em mobile/webviews
+                origin: window.location.origin,
+              },
+            },
+            file: { forceAudio: true },
+          }}
+        />
+      </div>
 
-      {/* TOPO */}
-      <div className="bg-gradient-to-r from-[#182C68] to-[#304896] h-8 flex items-center px-2 text-[11px] gap-3 border-b border-[#586987] shadow-sm z-10 flex-shrink-0">
+      {/* HEADER */}
+      <div className="bg-gradient-to-r from-[#182C68] to-[#304896] h-8 flex items-center px-2 text-[11px] gap-3 border-b border-[#586987] shadow-sm flex-shrink-0 z-10">
         <span className="font-bold italic text-gray-300 pr-2 border-r border-gray-500">
           WMP
         </span>
@@ -373,36 +366,61 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
 
       {/* MAIN */}
       <div className="flex-grow flex overflow-hidden bg-[#2C3E50]">
-        <div className="flex-1 flex flex-col p-2 bg-gradient-to-b from-[#627390] to-[#2C3E50]">
-          <div className="flex-grow relative shadow-xl border border-[#333] bg-black group">
-            <CanvasVisualizer
-              audioRef={audioRef}
-              isPlaying={isPlaying}
-              cover={currentTrack?.cover}
-            />
-            {currentTrack.url && (
-              <div className="absolute top-2 right-2 z-30">
-                <button
-                  onClick={handleToggleLike}
-                  className={`p-2 rounded-full bg-black/40 hover:bg-black/60 transition-all ${
-                    isCurrentTrackLiked
-                      ? "text-red-500"
-                      : "text-white/50 hover:text-white"
-                  }`}
-                >
-                  {isCurrentTrackLiked ? <FaHeart /> : <FaRegHeart />}
-                </button>
+        {/* Lado Esquerdo */}
+        <div className="flex-1 flex flex-col p-2 bg-gradient-to-b from-[#627390] to-[#2C3E50] min-w-0">
+          <div className="flex-grow relative shadow-xl border border-[#333] bg-black group min-h-[100px]">
+            {hasError ? (
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-red-400 gap-2">
+                <FaExclamationTriangle size={30} />
+                <span className="text-xs">Erro ao carregar mídia</span>
               </div>
+            ) : (
+              <CanvasVisualizer
+                audioRef={playerRef}
+                isPlaying={isPlaying}
+                cover={currentTrack?.cover}
+                isYouTube={currentTrack?.source === "youtube"}
+              />
             )}
+
+            <div className="absolute top-2 right-2 z-30">
+              <button
+                onClick={handleToggleLike}
+                className={`p-2 rounded-full bg-black/40 hover:bg-black/60 transition-all ${
+                  isCurrentTrackLiked
+                    ? "text-red-500"
+                    : "text-white/50 hover:text-white"
+                }`}
+              >
+                {isCurrentTrackLiked ? <FaHeart /> : <FaRegHeart />}
+              </button>
+            </div>
           </div>
-          <div className="mt-2 text-center h-10 flex-shrink-0 relative">
-            <p className="text-sm font-bold text-white drop-shadow-md truncate px-2">
-              {currentTrack.title}
+
+          <div className="mt-2 text-center h-12 flex flex-col justify-center flex-shrink-0 px-2 w-full">
+            <p
+              className="text-sm font-bold text-white drop-shadow-md w-full truncate block"
+              title={decodeHtml(currentTrack.title)}
+            >
+              {decodeHtml(currentTrack.title)}
             </p>
-            <p className="text-[10px] text-gray-300">{currentTrack.artist}</p>
+            <div className="flex items-center justify-center gap-2 w-full">
+              <p
+                className="text-[10px] text-gray-300 truncate max-w-[80%] block"
+                title={decodeHtml(currentTrack.artist)}
+              >
+                {decodeHtml(currentTrack.artist)}
+              </p>
+              {currentTrack.source === "youtube" && (
+                <span className="text-[8px] bg-red-600 px-1 rounded text-white flex-shrink-0">
+                  YT
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
+        {/* Lado Direito */}
         <div className="w-56 bg-white text-black border-l-2 border-[#182C68] flex flex-col relative flex-shrink-0">
           {activeView === "PLAYLIST" && (
             <div className="overflow-y-auto flex-grow bg-white">
@@ -410,7 +428,7 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
                 <div className="p-4 text-center text-xs text-gray-400 mt-10">
                   Playlist empty.
                   <br />
-                  Use Smart DJ to add songs.
+                  Use Smart DJ.
                 </div>
               ) : (
                 playlist.map((track, idx) => (
@@ -426,19 +444,21 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
                         : "hover:bg-[#F3F3F3]"
                     }`}
                   >
-                    <span className="text-[10px] opacity-70 w-4 text-right">
+                    <span className="text-[10px] opacity-70 w-4 text-right flex-shrink-0">
                       {idx + 1}.
                     </span>
-                    <div className="flex flex-col overflow-hidden w-full">
-                      <span className="truncate font-bold">{track.title}</span>
+                    <div className="flex flex-col overflow-hidden min-w-0 w-full">
+                      <span className="truncate font-bold w-full block">
+                        {decodeHtml(track.title)}
+                      </span>
                       <span
-                        className={`text-[9px] truncate ${
+                        className={`text-[9px] truncate w-full block ${
                           idx === currentTrackIndex
                             ? "text-blue-100"
                             : "text-gray-500"
                         }`}
                       >
-                        {track.artist}
+                        {decodeHtml(track.artist)}
                       </span>
                     </div>
                   </div>
@@ -449,7 +469,7 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
 
           {activeView === "SEARCH" && (
             <div className="flex flex-col h-full bg-[#F0F0F0] relative">
-              <div className="bg-[#2C3E50] p-2 text-white text-xs font-bold flex items-center gap-2 shadow-md">
+              <div className="bg-[#2C3E50] p-2 text-white text-xs font-bold flex items-center gap-2 shadow-md flex-shrink-0">
                 <FaSearch className="text-[#42B638]" />
                 <span>Smart DJ (AI)</span>
               </div>
@@ -467,17 +487,10 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
                   placeholder="e.g., Yoshi City Yung Lean"
                   className="w-full p-2 text-xs border-2 border-[#7F9DB9] rounded-sm focus:border-[#3C7FB1] outline-none shadow-inner"
                 />
-
-                <div className="text-[10px] text-gray-500 bg-yellow-50 p-2 border border-yellow-200 rounded">
-                  <strong>Tip:</strong> Be specific! <br />
-                  "Songs like Yoshi City" <br />
-                  "80s Japanese City Pop"
-                </div>
-
                 <button
                   onClick={handleVibeSubmit}
                   disabled={isLoadingAi || !vibeInput.trim()}
-                  className="bg-[#3C7FB1] text-white px-3 py-2 rounded-sm text-xs font-bold shadow-md active:translate-y-[1px] disabled:opacity-50 hover:bg-[#2C5F85] transition-colors flex items-center justify-center gap-2 mt-2"
+                  className="bg-[#3C7FB1] text-white px-3 py-2 rounded-sm text-xs font-bold shadow-md hover:bg-[#2C5F85] flex items-center justify-center gap-2 mt-2"
                 >
                   {isLoadingAi ? "Thinking..." : "Generate Playlist"}
                 </button>
@@ -491,7 +504,10 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
       <div className="h-16 bg-gradient-to-b from-[#6B7D94] via-[#405168] to-[#2C3E50] border-t border-[#8FA0B5] flex flex-col px-3 pb-1 relative shadow-[0_-2px_5px_rgba(0,0,0,0.3)] z-20 flex-shrink-0">
         <div className="w-full flex items-center gap-2 mb-1 mt-1">
           <span className="text-[9px] w-8 text-right font-mono text-[#42B638]">
-            {formatTime(currentTime)}
+            {Math.floor(currentTime / 60)}:
+            {Math.floor(currentTime % 60)
+              .toString()
+              .padStart(2, "0")}
           </span>
           <input
             type="range"
@@ -499,31 +515,35 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
             max={duration || 100}
             value={currentTime}
             onChange={(e) => {
-              if (audioRef.current)
-                audioRef.current.currentTime = e.target.value;
+              const newTime = parseFloat(e.target.value);
+              setCurrentTime(newTime);
+              if (playerRef.current) playerRef.current.seekTo(newTime);
             }}
             className="flex-grow h-1.5 bg-black rounded-full appearance-none cursor-pointer accent-[#42B638] border border-[#555]"
           />
           <span className="text-[9px] w-8 font-mono">
-            {formatTime(duration)}
+            {Math.floor(duration / 60)}:
+            {Math.floor(duration % 60)
+              .toString()
+              .padStart(2, "0")}
           </span>
         </div>
         <div className="flex items-center justify-center gap-5 pb-1 relative">
           <button
             onClick={() => {
               setIsPlaying(false);
-              if (audioRef.current) audioRef.current.currentTime = 0;
+              if (playerRef.current) playerRef.current.seekTo(0);
             }}
-            className="w-8 h-8 rounded-full bg-gradient-to-b from-[#E0E0E0] to-[#999] shadow-[1px_1px_3px_black] border border-[#555] flex items-center justify-center hover:brightness-110 active:scale-95"
+            className="w-8 h-8 rounded-full bg-gradient-to-b from-[#E0E0E0] to-[#999] shadow border border-[#555] flex items-center justify-center hover:brightness-110"
           >
             <FaStop className="text-[#182C68] text-xs" />
           </button>
           <button
             onClick={() => setIsPlaying(!isPlaying)}
-            className="w-11 h-11 -mt-1 rounded-full bg-gradient-to-b from-[#FFF] to-[#C0C0C0] shadow-[1px_2px_5px_black] border-2 border-[#666] flex items-center justify-center hover:brightness-110 active:scale-95 transition-transform"
+            className="w-11 h-11 -mt-1 rounded-full bg-gradient-to-b from-[#FFF] to-[#C0C0C0] shadow border-2 border-[#666] flex items-center justify-center hover:brightness-110"
           >
             {isPlaying ? (
-              <FaPause className="text-[#182C68] text-lg ml-[1px]" />
+              <FaPause className="text-[#182C68] text-lg" />
             ) : (
               <FaPlay className="text-[#182C68] text-lg ml-1" />
             )}
