@@ -12,14 +12,13 @@ const PORT = process.env.PORT || 3001;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID;
 const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
-const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
+// YOUTUBE REMOVIDO
 const REDIRECT_URI = `http://127.0.0.1:${PORT}/api/spotify/callback`;
 
 console.log("------------------------------------------------");
-console.log("🚀 Iniciando VerseVault Server (Hybrid Edition)");
+console.log("🚀 Iniciando VerseVault Server (Audio Only Edition)");
 console.log(`🔑 Groq Key: ${GROQ_API_KEY ? "✅" : "❌"}`);
 console.log(`🎵 Spotify ID: ${SPOTIFY_CLIENT_ID ? "✅" : "❌"}`);
-console.log(`📺 YouTube Key: ${YOUTUBE_API_KEY ? "✅" : "❌"}`);
 console.log("------------------------------------------------");
 
 const groq = new Groq({ apiKey: GROQ_API_KEY });
@@ -27,10 +26,9 @@ const groq = new Groq({ apiKey: GROQ_API_KEY });
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
-// --- CACHES (Para poupar API e tempo) ---
+// --- CACHES ---
 const searchCache = new Map();
 let dailyCache = { dayId: null, data: null };
-const youtubeCache = new Map(); // Cache específico para IDs de vídeo
 
 // --- HELPERS ---
 function normalize(str) {
@@ -64,7 +62,6 @@ function formatTrack(t) {
 }
 
 // --- PESQUISA DEEZER (COM CACHE) ---
-// --- PESQUISA DEEZER (COM CACHE) ---
 async function searchDeezer(title, artist) {
   const cacheKey = `deezer:${normalize(title)}|${normalize(artist)}`;
   if (searchCache.has(cacheKey)) return searchCache.get(cacheKey);
@@ -84,7 +81,6 @@ async function searchDeezer(title, artist) {
 
     if (res.data?.data?.length > 0) {
       let t = res.data.data[0];
-      // MODIFICAÇÃO CHAVE: Só aceita se o artista corresponder E houver um preview (URL)
       if (isArtistMatch(t.artist.name) && t.preview) result = formatTrack(t);
     }
 
@@ -95,7 +91,6 @@ async function searchDeezer(title, artist) {
       });
       if (res.data?.data?.length > 0) {
         const valid = res.data.data.find(
-          // MODIFICAÇÃO CHAVE: Procura pelo primeiro resultado válido com um preview (URL)
           (t) => isArtistMatch(t.artist.name) && t.preview
         );
         if (valid) result = formatTrack(valid);
@@ -108,99 +103,6 @@ async function searchDeezer(title, artist) {
   searchCache.set(cacheKey, result);
   return result;
 }
-
-// --- PESQUISA YOUTUBE (FALLBACK PARA MÚSICAS RARAS) ---
-async function searchYoutube(title, artist) {
-  const cacheKey = `yt:${normalize(title)}|${normalize(artist)}`;
-  if (searchCache.has(cacheKey)) return searchCache.get(cacheKey);
-
-  let result = null;
-
-  // Só executa se tivermos chave configurada
-  if (YOUTUBE_API_KEY) {
-    try {
-      console.log(
-        `⚠️ Deezer falhou. Tentando YouTube para: ${title} - ${artist}`
-      );
-      const response = await axios.get(
-        "https://www.googleapis.com/youtube/v3/search",
-        {
-          params: {
-            part: "snippet",
-            q: `${artist} ${title} audio`,
-            type: "video",
-            maxResults: 1,
-            key: YOUTUBE_API_KEY,
-          },
-        }
-      );
-
-      const items = response.data.items;
-      if (items && items.length > 0) {
-        const video = items[0];
-        result = {
-          id: video.id.videoId,
-          title: video.snippet.title,
-          artist: artist,
-          url: null, // YouTube não dá áudio direto, o frontend usa o ID para o player
-          cover: video.snippet.thumbnails.high.url,
-          album: "YouTube Music",
-          source: "youtube", // Flag para o frontend saber que é vídeo
-          videoId: video.id.videoId,
-        };
-      }
-    } catch (error) {
-      console.error("YouTube Search Error:", error.message);
-    }
-  }
-
-  searchCache.set(cacheKey, result);
-  return result;
-}
-
-// =========================================================
-//      ENDPOINTS YOUTUBE (DAILY DROP)
-// =========================================================
-app.get("/api/youtube/video", async (req, res) => {
-  const { artist } = req.query;
-  if (!artist || !YOUTUBE_API_KEY)
-    return res.status(400).json({ error: "Missing config" });
-
-  // Cache específico para não gastar quota no Daily Drop
-  if (youtubeCache.has(artist)) {
-    return res.json({ videoId: youtubeCache.get(artist) });
-  }
-
-  try {
-    const response = await axios.get(
-      "https://www.googleapis.com/youtube/v3/search",
-      {
-        params: {
-          part: "snippet",
-          q: `${artist} greatest hit song official video`,
-          type: "video",
-          maxResults: 1,
-          key: YOUTUBE_API_KEY,
-        },
-      }
-    );
-
-    const items = response.data.items;
-    if (items && items.length > 0) {
-      const videoId = items[0].id.videoId;
-      youtubeCache.set(artist, videoId);
-      return res.json({ videoId });
-    }
-
-    res.status(404).json({ error: "No video found" });
-  } catch (error) {
-    console.error(
-      "YouTube API Error:",
-      error.response?.data?.error?.message || error.message
-    );
-    res.status(500).json({ error: "YouTube failed" });
-  }
-});
 
 // =========================================================
 //      ENDPOINTS SPOTIFY
@@ -275,7 +177,6 @@ app.post("/api/spotify/create-playlist", async (req, res) => {
     );
     const playlistId = createRes.data.id;
 
-    // Otimização: Promise.all para buscar URIs em paralelo
     const searchPromises = trackUris.map((trackStr) =>
       axios
         .get("https://api.spotify.com/v1/search", {
@@ -292,7 +193,7 @@ app.post("/api/spotify/create-playlist", async (req, res) => {
     if (validUris.length > 0) {
       await axios.post(
         `https://api.spotify.com/v1/playlists/${playlistId}/tracks`,
-        { uris: validUris.slice(0, 99) }, // Spotify limita a 100 por request
+        { uris: validUris.slice(0, 99) },
         { headers: { Authorization: `Bearer ${token}` } }
       );
     }
@@ -311,7 +212,7 @@ app.post("/api/spotify/create-playlist", async (req, res) => {
 //      ENDPOINTS AI & GAME
 // =========================================================
 
-// AI DJ Inteligente (Híbrido)
+// AI DJ (Apenas Deezer)
 app.post("/api/ai/recommend", async (req, res) => {
   try {
     const { vibe } = req.body;
@@ -335,19 +236,14 @@ app.post("/api/ai/recommend", async (req, res) => {
     const aiResponse = JSON.parse(chatCompletion.choices[0].message.content);
     const songList = aiResponse.songs || [];
 
-    // Lógica Híbrida: Tenta Deezer -> Falha -> Tenta YouTube
+    // Lógica Simplificada: Apenas Deezer
     const promises = songList.map(async (song) => {
-      let track = await searchDeezer(song.title, song.artist);
-      if (!track) {
-        track = await searchYoutube(song.title, song.artist);
-      }
-      return track;
+      return await searchDeezer(song.title, song.artist);
     });
 
     const results = await Promise.all(promises);
     const validTracks = results.filter((t) => t !== null);
 
-    // Remover duplicados
     const uniqueTracks = Array.from(
       new Map(validTracks.map((item) => [item.id, item])).values()
     );
@@ -363,6 +259,7 @@ app.post("/api/ai/recommend", async (req, res) => {
   }
 });
 
+// Game (mantido igual, já usava Deezer)
 app.get("/api/game/generate", async (req, res) => {
   try {
     const { mode, query } = req.query;
@@ -421,13 +318,9 @@ app.get("/api/game/generate", async (req, res) => {
 app.get("/api/game/daily", async (req, res) => {
   try {
     const daySeed = Math.floor(Date.now() / 86400000);
-
-    // Verifica Cache
     if (dailyCache.dayId === daySeed && dailyCache.data) {
-      console.log("📦 Servindo Daily Drop da cache");
       return res.json(dailyCache.data);
     }
-
     const legends = [
       "Michael Jackson",
       "Queen",
@@ -439,28 +332,19 @@ app.get("/api/game/daily", async (req, res) => {
       "Beyoncé",
       "Bruno Mars",
       "Adele",
-      "Nirvana",
-      "Metallica",
-      "Pink Floyd",
-      "David Bowie",
-      "Prince",
-      "Madonna",
-      "Elton John",
     ];
     const artistName = legends[daySeed % legends.length];
-
     const searchRes = await axios.get("https://api.deezer.com/search/artist", {
       params: { q: artistName, limit: 1 },
     });
     const artist = searchRes.data.data[0];
 
-    // FIX DA GROQ: Adicionado pedido explícito de JSON no system prompt
     const chatCompletion = await groq.chat.completions.create({
       messages: [
         {
           role: "system",
           content:
-            "Generate 3 fun trivia hints about this artist. No names. Respond in JSON format with a 'hints' array.",
+            "Generate 3 fun trivia hints about this artist. No names. Respond in JSON with a 'hints' array.",
         },
         { role: "user", content: `Artist: ${artistName}` },
       ],
@@ -469,20 +353,15 @@ app.get("/api/game/daily", async (req, res) => {
     });
 
     const aiData = JSON.parse(chatCompletion.choices[0].message.content);
-
     const responseData = {
       dayId: daySeed,
       name: artist.name,
       image: artist.picture_medium,
-      hints: aiData.hints || ["Superstar", "Chart topper", "Legend"],
+      hints: aiData.hints || ["Legend"],
     };
-
     dailyCache = { dayId: daySeed, data: responseData };
     res.json(responseData);
   } catch (e) {
-    console.error("ERRO DAILY DROP:", e.message);
-    // Log detalhado para debug se for erro de API
-    if (e.response) console.error("Detalhes:", e.response.data);
     res.status(500).json({ error: "Daily Error" });
   }
 });
