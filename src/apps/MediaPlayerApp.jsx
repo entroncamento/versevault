@@ -185,7 +185,7 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(0.5);
-  const [hasError, setHasError] = useState(false); // Estado de erro
+  const [hasError, setHasError] = useState(false);
 
   const [activeView, setActiveView] = useState("PLAYLIST");
   const [vibeInput, setVibeInput] = useState("");
@@ -221,11 +221,10 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
     }
   }, [trackToPlay]);
 
-  // Reset de erro ao mudar de música
   useEffect(() => {
     setHasError(false);
     setDuration(0);
-  }, [currentTrackIndex]);
+  }, [currentTrackIndex, currentTrack]);
 
   useEffect(() => {
     const loadUserTaste = async () => {
@@ -296,23 +295,22 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#2C3E50] text-white font-sans select-none overflow-hidden">
-      {/* PLAYER OFF-SCREEN 
-          Usamos 'key' para forçar o React a destruir e recriar o player a cada música nova.
-          Isso resolve o bug de duração 0:00 no YouTube.
-      */}
-      <div className="fixed top-0 left-[-9999px] w-64 h-64 opacity-0 pointer-events-none z-0">
+    <div className="flex flex-col h-full bg-[#2C3E50] text-white font-sans select-none overflow-hidden relative">
+      {/* PLAYER (Escondido mas presente na DOM com 1px) */}
+      <div className="absolute top-0 left-0 w-[1px] h-[1px] opacity-[0.01] overflow-hidden z-[50] pointer-events-none">
         <ReactPlayer
-          key={getTrackUrl(currentTrack) || "no-track"} // O TRUQUE MÁGICO
           ref={playerRef}
           url={getTrackUrl(currentTrack)}
           playing={isPlaying}
           volume={volume}
-          muted={false} // Garante som
+          muted={false}
           width="100%"
           height="100%"
           onProgress={(state) => setCurrentTime(state.playedSeconds)}
           onDuration={(dur) => setDuration(dur)}
+          // Sincronizar estado real do player
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
           onEnded={() => {
             if (currentTrackIndex < playlist.length - 1)
               setCurrentTrackIndex((prev) => prev + 1);
@@ -320,17 +318,20 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
           }}
           onError={(e) => {
             console.error("Player Error:", e);
-            setHasError(true);
+            // Não mostrar erro fatal imediatamente se for só um abort de navegação
+            if (e && e.name !== "AbortError") {
+              setHasError(true);
+            }
           }}
           config={{
             youtube: {
               playerVars: {
                 showinfo: 0,
                 controls: 0,
-                disablekb: 1, // Desativa atalhos de teclado do YT
+                disablekb: 1,
                 fs: 0,
                 iv_load_policy: 3,
-                playsinline: 1, // Ajuda em mobile/webviews
+                playsinline: 1,
                 origin: window.location.origin,
               },
             },
@@ -367,21 +368,24 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
       {/* MAIN */}
       <div className="flex-grow flex overflow-hidden bg-[#2C3E50]">
         {/* Lado Esquerdo */}
-        <div className="flex-1 flex flex-col p-2 bg-gradient-to-b from-[#627390] to-[#2C3E50] min-w-0">
+        <div className="flex-1 flex flex-col p-2 bg-gradient-to-b from-[#627390] to-[#2C3E50] min-w-0 relative z-0">
           <div className="flex-grow relative shadow-xl border border-[#333] bg-black group min-h-[100px]">
-            {hasError ? (
-              <div className="absolute inset-0 flex flex-col items-center justify-center text-red-400 gap-2">
-                <FaExclamationTriangle size={30} />
-                <span className="text-xs">Erro ao carregar mídia</span>
-              </div>
-            ) : (
-              <CanvasVisualizer
-                audioRef={playerRef}
-                isPlaying={isPlaying}
-                cover={currentTrack?.cover}
-                isYouTube={currentTrack?.source === "youtube"}
-              />
-            )}
+            {/* Visualizador */}
+            <div className="absolute inset-0 z-10 w-full h-full">
+              {hasError ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-red-400 gap-2 bg-black">
+                  <FaExclamationTriangle size={30} />
+                  <span className="text-xs">Erro ao carregar mídia</span>
+                </div>
+              ) : (
+                <CanvasVisualizer
+                  audioRef={playerRef}
+                  isPlaying={isPlaying}
+                  cover={currentTrack?.cover}
+                  isYouTube={currentTrack?.source === "youtube"}
+                />
+              )}
+            </div>
 
             <div className="absolute top-2 right-2 z-30">
               <button
@@ -421,7 +425,7 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
         </div>
 
         {/* Lado Direito */}
-        <div className="w-56 bg-white text-black border-l-2 border-[#182C68] flex flex-col relative flex-shrink-0">
+        <div className="w-56 bg-white text-black border-l-2 border-[#182C68] flex flex-col relative flex-shrink-0 z-0">
           {activeView === "PLAYLIST" && (
             <div className="overflow-y-auto flex-grow bg-white">
               {playlist.length === 0 ? (
@@ -517,7 +521,13 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
             onChange={(e) => {
               const newTime = parseFloat(e.target.value);
               setCurrentTime(newTime);
-              if (playerRef.current) playerRef.current.seekTo(newTime);
+              // Proteção segura contra erros de referência
+              if (
+                playerRef.current &&
+                typeof playerRef.current.seekTo === "function"
+              ) {
+                playerRef.current.seekTo(newTime);
+              }
             }}
             className="flex-grow h-1.5 bg-black rounded-full appearance-none cursor-pointer accent-[#42B638] border border-[#555]"
           />
@@ -532,7 +542,12 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
           <button
             onClick={() => {
               setIsPlaying(false);
-              if (playerRef.current) playerRef.current.seekTo(0);
+              if (
+                playerRef.current &&
+                typeof playerRef.current.seekTo === "function"
+              ) {
+                playerRef.current.seekTo(0);
+              }
             }}
             className="w-8 h-8 rounded-full bg-gradient-to-b from-[#E0E0E0] to-[#999] shadow border border-[#555] flex items-center justify-center hover:brightness-110"
           >
@@ -549,18 +564,27 @@ const MediaPlayerApp = ({ windowId, trackToPlay }) => {
             )}
           </button>
           <div className="flex items-center gap-2 absolute right-0 bottom-1">
-            {volume === 0 ? (
-              <FaVolumeMute className="text-gray-400 text-xs" />
-            ) : (
-              <FaVolumeUp className="text-gray-400 text-xs" />
-            )}
+            <button
+              onClick={() => {
+                setVolume((prev) => (prev === 0 ? 0.5 : 0));
+              }}
+              className="p-1 rounded-full hover:bg-black/10 transition-colors"
+            >
+              {volume === 0 ? (
+                <FaVolumeMute className="text-gray-400 text-xs" />
+              ) : (
+                <FaVolumeUp className="text-gray-400 text-xs" />
+              )}
+            </button>
             <input
               type="range"
               min="0"
               max="1"
               step="0.05"
               value={volume}
-              onChange={(e) => setVolume(parseFloat(e.target.value))}
+              onChange={(e) => {
+                setVolume(parseFloat(e.target.value));
+              }}
               className="w-16 h-1.5 bg-black rounded-full appearance-none cursor-pointer accent-[#42B638] border border-[#555]"
             />
           </div>

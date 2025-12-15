@@ -64,6 +64,7 @@ function formatTrack(t) {
 }
 
 // --- PESQUISA DEEZER (COM CACHE) ---
+// --- PESQUISA DEEZER (COM CACHE) ---
 async function searchDeezer(title, artist) {
   const cacheKey = `deezer:${normalize(title)}|${normalize(artist)}`;
   if (searchCache.has(cacheKey)) return searchCache.get(cacheKey);
@@ -83,7 +84,8 @@ async function searchDeezer(title, artist) {
 
     if (res.data?.data?.length > 0) {
       let t = res.data.data[0];
-      if (isArtistMatch(t.artist.name)) result = formatTrack(t);
+      // MODIFICAÇÃO CHAVE: Só aceita se o artista corresponder E houver um preview (URL)
+      if (isArtistMatch(t.artist.name) && t.preview) result = formatTrack(t);
     }
 
     // 2. Busca Solta (Fallback)
@@ -92,7 +94,10 @@ async function searchDeezer(title, artist) {
         params: { q: `${title} ${artist}`, limit: 3 },
       });
       if (res.data?.data?.length > 0) {
-        const valid = res.data.data.find((t) => isArtistMatch(t.artist.name));
+        const valid = res.data.data.find(
+          // MODIFICAÇÃO CHAVE: Procura pelo primeiro resultado válido com um preview (URL)
+          (t) => isArtistMatch(t.artist.name) && t.preview
+        );
         if (valid) result = formatTrack(valid);
       }
     }
