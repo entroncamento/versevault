@@ -3,11 +3,15 @@ import React, {
   useState,
   useContext,
   useCallback,
-  Suspense,
+  Suspense, // Suspense é necessário para Lazy Loading
 } from "react";
 import { v4 as uuidv4 } from "uuid";
 
-// Importações Lazy
+// =========================================================
+// CODE SPLITTING (Lazy Imports)
+// =========================================================
+// Importamos os componentes das Apps apenas quando são necessários.
+// Isto reduz drasticamente o tamanho do bundle inicial do JavaScript (bundle.js).
 const QuizApp = React.lazy(() => import("../apps/QuizApp.jsx"));
 const MyComputer = React.lazy(() => import("../apps/MyComputer.jsx"));
 const LeaderboardApp = React.lazy(() => import("../apps/LeaderboardApp.jsx"));
@@ -18,9 +22,12 @@ const MyDocumentsApp = React.lazy(() => import("../apps/MyDocumentsApp.jsx"));
 const ConfirmDialogApp = React.lazy(() =>
   import("../apps/ConfirmDialogApp.jsx")
 );
-// ADICIONADO: Importar Input Dialog
 const InputDialogApp = React.lazy(() => import("../apps/InputDialogApp.jsx"));
 
+// =========================================================
+// REGISTO DE APLICAÇÕES (System Registry)
+// =========================================================
+// Mapeia chaves únicas (ex: "QUIZ") para as suas configurações.
 const appRegistry = {
   QUIZ: {
     component: QuizApp,
@@ -62,7 +69,6 @@ const appRegistry = {
     title: "Confirm",
     icon: "https://win98icons.alexmeub.com/icons/png/msg_warning-0.png",
   },
-  // ADICIONADO: Registo do Input Dialog
   INPUT_DIALOG: {
     component: InputDialogApp,
     title: "Input",
@@ -73,12 +79,21 @@ const appRegistry = {
 const WindowManagerContext = createContext();
 
 export const WindowManagerProvider = ({ children }) => {
+  // Estado das janelas abertas (Array de objetos)
   const [windows, setWindows] = useState([]);
+
+  // Z-Index global: Garante que novas janelas aparecem sempre no topo
   const [highestZIndex, setHighestZIndex] = useState(10);
+
+  // =========================================================
+  // WINDOW ACTIONS (API Pública do Contexto)
+  // =========================================================
 
   const openWindow = useCallback(
     (appKey, data = {}) => {
       const appConfig = appRegistry[appKey];
+
+      // Validação de Segurança
       if (!appConfig) {
         console.error(`App não encontrada no registo: ${appKey}`);
         return;
@@ -87,35 +102,36 @@ export const WindowManagerProvider = ({ children }) => {
       const newZIndex = highestZIndex + 1;
       setHighestZIndex(newZIndex);
 
-      // Tamanhos padrão
+      // --- Definição de Tamanhos Padrão ---
       let windowSize = { width: 640, height: 480 };
 
+      // Tamanhos customizados por App
       if (appKey === "LEADERBOARD") windowSize = { width: 600, height: 500 };
       else if (appKey === "DAILY_DROP")
         windowSize = { width: 400, height: 550 };
       else if (appKey === "CONFIRM_DIALOG")
         windowSize = { width: 350, height: 160 };
-      // Tamanho para o Input Dialog
       else if (appKey === "INPUT_DIALOG")
         windowSize = { width: 350, height: 160 };
 
-      // Override se passares tamanho no data
+      // Override se passares tamanho no objeto 'data'
       if (data.width && data.height) {
         windowSize = { width: data.width, height: data.height };
       }
 
       const newWindow = {
-        id: uuidv4(),
+        id: uuidv4(), // ID único para a key do React
         appKey,
         title: data.title || appConfig.title,
         content: appConfig.component,
-        icon: data.icon || appConfig.icon, // Permite ícone dinâmico
+        icon: data.icon || appConfig.icon,
         zIndex: newZIndex,
         isMinimized: false,
         isMaximized: false,
+        // Posição inicial com ligeiro "Random Offset" para não empilhar exatamente em cima
         position: { x: 150 + Math.random() * 30, y: 150 + Math.random() * 30 },
         size: windowSize,
-        props: data,
+        props: data, // Passa dados extra para o componente da App
       };
 
       setWindows((prevWindows) => [...prevWindows, newWindow]);
@@ -149,7 +165,9 @@ export const WindowManagerProvider = ({ children }) => {
   const focusWindow = useCallback(
     (id) => {
       const windowToFocus = windows.find((w) => w.id === id);
+      // Otimização: Se já estiver no topo, não faz nada
       if (!windowToFocus || windowToFocus.zIndex === highestZIndex) return;
+
       const newZIndex = highestZIndex + 1;
       setHighestZIndex(newZIndex);
       setWindows((prevWindows) =>

@@ -5,22 +5,27 @@ import { useWindowManager } from "../contexts/WindowManagerContext";
 
 const PROXY_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";
 
+/**
+ * Aplicação "My Documents" (Gestor de Ficheiros).
+ * Implementa lógica complexa de UI:
+ * - Seleção Múltipla (Drag Selection Box).
+ * - Navegação Hierárquica (Root -> Folder).
+ * - Drag & Drop de Ficheiros para Pastas.
+ * - Menu de Contexto Customizado.
+ */
 const MyDocumentsApp = ({ windowId }) => {
   const { currentUser } = useAuth();
   const { openWindow } = useWindowManager();
 
-  const [currentPath, setCurrentPath] = useState("ROOT");
+  // --- STATE: DADOS ---
+  const [currentPath, setCurrentPath] = useState("ROOT"); // "ROOT" ou ID da pasta
   const [folders, setFolders] = useState([]);
   const [likedTracks, setLikedTracks] = useState([]);
+
+  // --- STATE: UI & INTERAÇÃO ---
   const [spotifyToken, setSpotifyToken] = useState(null);
-
-  // --- ESTADOS DE SELEÇÃO ---
-  const [selectedItems, setSelectedItems] = useState(new Set());
-  const [selectionBox, setSelectionBox] = useState(null);
-  const isDragging = useRef(false);
-  const dragStart = useRef({ x: 0, y: 0 });
-  const containerRef = useRef(null);
-
+  const [selectedItems, setSelectedItems] = useState(new Set()); // Set para O(1) lookups
+  const [selectionBox, setSelectionBox] = useState(null); // Caixa azul de seleção
   const [contextMenu, setContextMenu] = useState({
     visible: false,
     x: 0,
@@ -29,20 +34,34 @@ const MyDocumentsApp = ({ windowId }) => {
     data: null,
   });
 
+  // --- REFS (Para evitar re-renders durante operações de alta frequência como drag) ---
+  const isDragging = useRef(false);
+  const dragStart = useRef({ x: 0, y: 0 });
+  const containerRef = useRef(null); // Ref para a área de scroll
+
+  // =========================================================
+  // 1. DATA FETCHING
+  // =========================================================
   const loadData = useCallback(async () => {
     if (!currentUser) return;
-    const stats = await leaderboardApi.getUserStats(currentUser.uid);
-    if (stats) {
-      setLikedTracks(stats.likedTracks || []);
-      setFolders(stats.folders || []);
+    try {
+      const stats = await leaderboardApi.getUserStats(currentUser.uid);
+      if (stats) {
+        setLikedTracks(stats.likedTracks || []);
+        setFolders(stats.folders || []);
+      }
+    } catch (error) {
+      console.error("Erro ao carregar documentos:", error);
     }
   }, [currentUser]);
 
+  // Carrega dados inicial e limpa seleção ao navegar
   useEffect(() => {
     loadData();
-    setSelectedItems(new Set()); // Limpa seleção ao mudar de pasta
+    setSelectedItems(new Set());
   }, [loadData, currentPath]);
 
+  // Listener global para fechar menus de contexto ao clicar fora
   useEffect(() => {
     const handleGlobalClick = () => {
       if (contextMenu.visible)
@@ -52,16 +71,21 @@ const MyDocumentsApp = ({ windowId }) => {
     return () => window.removeEventListener("click", handleGlobalClick);
   }, [contextMenu]);
 
-  // --- FUNÇÕES SPOTIFY ---
+  // =========================================================
+  // 2. INTEGRAÇÃO SPOTIFY (Exportação)
+  // =========================================================
   const connectSpotify = () => {
     const popup = window.open(
       `${PROXY_BASE}/api/spotify/login`,
       "Spotify Login",
       "width=500,height=600"
     );
+
+    // Comunicação segura via PostMessage
     const receiveMessage = (event) => {
       if (event.data.type === "SPOTIFY_TOKEN") {
         setSpotifyToken(event.data.token);
+        // Feedback visual simples (poderia ser um modal customizado)
         alert("Spotify Connected!");
         window.removeEventListener("message", receiveMessage);
       }
@@ -73,14 +97,16 @@ const MyDocumentsApp = ({ windowId }) => {
     if (!spotifyToken) {
       openWindow("CONFIRM_DIALOG", {
         title: "Spotify Login",
-        message: "Connect Spotify?",
+        message: "Connect Spotify to export playlist?",
         icon: "warning",
         onConfirm: connectSpotify,
       });
       return;
     }
+
+    // Prepara payload
     const searchTerms = folder.tracks.map((t) => `${t.artist} ${t.title}`);
-    if (searchTerms.length === 0) return alert("Folder empty.");
+    if (searchTerms.length === 0) return alert("Folder is empty.");
 
     try {
       await fetch(`${PROXY_BASE}/api/spotify/create-playlist`, {
@@ -92,18 +118,23 @@ const MyDocumentsApp = ({ windowId }) => {
           trackUris: searchTerms,
         }),
       });
-      alert("Exported!");
+      alert("Playlist exported to your Spotify account!");
     } catch (error) {
-      alert("Export failed.");
+      alert("Export failed. Check console.");
+      console.error(error);
     }
   };
 
-  // --- SELEÇÃO ---
+  // =========================================================
+  // 3. LÓGICA DE SELEÇÃO (DRAG BOX ENGINE)
+  // =========================================================
+
+  // Alterna seleção individual (Ctrl+Click)
   const toggleSelection = (id, multiSelect) => {
     const newSet = new Set(multiSelect ? selectedItems : []);
     if (newSet.has(id)) {
       if (multiSelect) newSet.delete(id);
-      else newSet.add(id);
+      else newSet.add(id); // Mantém selecionado se for clique simples
     } else {
       newSet.add(id);
     }
@@ -124,17 +155,25 @@ const MyDocumentsApp = ({ windowId }) => {
     setSelectedItems(allIds);
   };
 
-  // --- DRAG SELECTION ---
+  // --- MOUSE EVENTS PARA CAIXA DE SELEÇÃO ---
   const handleMouseDown = (e) => {
+    // Apenas botão esquerdo e se o clique for no fundo (container)
     if (e.button !== 0) return;
     if (e.target !== containerRef.current) return;
+
     isDragging.current = true;
     const rect = containerRef.current.getBoundingClientRect();
+
+    // Calcula posição inicial relativa ao scroll do container
     dragStart.current = {
       x: e.clientX - rect.left,
       y: e.clientY - rect.top + containerRef.current.scrollTop,
     };
+
+    // Limpa seleção anterior se não estiver a usar teclas modificadoras
     if (!e.ctrlKey && !e.shiftKey) setSelectedItems(new Set());
+
+    // Inicia caixa com tamanho 0
     setSelectionBox({
       x: dragStart.current.x,
       y: dragStart.current.y,
@@ -145,9 +184,12 @@ const MyDocumentsApp = ({ windowId }) => {
 
   const handleMouseMove = (e) => {
     if (!isDragging.current) return;
+
     const rect = containerRef.current.getBoundingClientRect();
     const currentX = e.clientX - rect.left;
     const currentY = e.clientY - rect.top + containerRef.current.scrollTop;
+
+    // Matemática para desenhar o retângulo em qualquer direção (puxar para trás/cima)
     setSelectionBox({
       x: Math.min(currentX, dragStart.current.x),
       y: Math.min(currentY, dragStart.current.y),
@@ -159,9 +201,14 @@ const MyDocumentsApp = ({ windowId }) => {
   const handleMouseUp = () => {
     if (!isDragging.current) return;
     isDragging.current = false;
+
+    // Lógica de Colisão AABB (Axis-Aligned Bounding Box)
+    // Verifica quais ícones estão dentro da caixa de seleção final.
     if (selectionBox && selectionBox.width > 5) {
       const newSelection = new Set(selectedItems);
+      // Seleciona elementos do DOM via atributo de dados (Performance hack)
       const itemElements = document.querySelectorAll("[data-selectable]");
+
       const boxRect = {
         left: selectionBox.x,
         top: selectionBox.y,
@@ -173,10 +220,13 @@ const MyDocumentsApp = ({ windowId }) => {
         const id = el.getAttribute("data-id");
         const elRectNative = el.getBoundingClientRect();
         const containerRect = containerRef.current.getBoundingClientRect();
+
+        // Normaliza coordenadas do elemento
         const elLeft = elRectNative.left - containerRect.left;
         const elTop =
           elRectNative.top - containerRect.top + containerRef.current.scrollTop;
 
+        // Verifica Interseção
         if (
           elLeft < boxRect.right &&
           elLeft + elRectNative.width > boxRect.left &&
@@ -188,16 +238,22 @@ const MyDocumentsApp = ({ windowId }) => {
       });
       setSelectedItems(newSelection);
     }
-    setSelectionBox(null);
+    setSelectionBox(null); // Remove a caixa visual
   };
 
-  // --- MENU CONTEXTO ---
+  // =========================================================
+  // 4. OPERAÇÕES DE FICHEIROS
+  // =========================================================
+
   const handleContextMenu = (e, type, data) => {
     e.preventDefault();
     e.stopPropagation();
+
+    // UX: Se clicar com botão direito num item não selecionado, seleciona-o.
     if (type === "ITEM" && !selectedItems.has(data)) {
       setSelectedItems(new Set([data]));
     }
+
     setContextMenu({
       visible: true,
       x: e.pageX,
@@ -217,6 +273,7 @@ const MyDocumentsApp = ({ windowId }) => {
       message: "Folder Name:",
       onConfirm: async (name) => {
         if (name) {
+          // Optimistic update podia ser feito aqui, mas reload é mais seguro para IDs
           await leaderboardApi.createFolder(currentUser, name);
           await loadData();
         }
@@ -224,12 +281,13 @@ const MyDocumentsApp = ({ windowId }) => {
     });
   };
 
-  // --- APAGAR EM MASSA (DENTRO E FORA DE PASTAS) ---
+  // --- DELETE LOGIC ---
   const performBulkDelete = async () => {
     if (currentPath === "ROOT") {
-      // Apagar pastas ou músicas dos Favoritos
+      // Apagar itens na raiz (Pastas ou Likes)
       const foldersToDelete = [];
       const tracksToDelete = [];
+
       selectedItems.forEach((id) => {
         const isFolder = folders.some((f) => f.id === id);
         if (isFolder) foldersToDelete.push(id);
@@ -238,47 +296,29 @@ const MyDocumentsApp = ({ windowId }) => {
           if (likedTracks[idx]) tracksToDelete.push(likedTracks[idx]);
         }
       });
+
       if (foldersToDelete.length === 0 && tracksToDelete.length === 0) return;
+
       await leaderboardApi.deleteItems(
         currentUser,
         foldersToDelete,
         tracksToDelete
       );
     } else {
-      // Apagar músicas DENTRO de uma pasta específica
+      // Apagar itens DENTRO de uma pasta
       const folder = folders.find((f) => f.id === currentPath);
       if (!folder) return;
 
-      // Filtra as tracks que NÃO foram selecionadas (para manter)
       const newTracks = folder.tracks.filter(
         (_, idx) => !selectedItems.has(`track-${idx}`)
       );
 
-      // Atualiza a pasta com a nova lista de tracks
-      // Nota: Isto requer que a API suporte atualizar uma pasta específica.
-      // Como o `leaderboardApi` atual pode não ter um "updateFolderTracks",
-      // vamos usar uma lógica simples de remover e recriar ou atualizar via 'deleteItems' adaptado.
-
-      // CORREÇÃO: Vamos atualizar diretamente o documento do utilizador removendo tracks da pasta específica.
-      // A função `deleteItems` atual apaga "Liked Songs". Precisamos de uma lógica para "Folder Tracks".
-
-      // SOLUÇÃO RÁPIDA: Atualizar a pasta localmente e enviar tudo para a API.
-      // No entanto, o `leaderboardApi` precisa de um método `updateFolder`.
-      // Vamos assumir que criamos um método auxiliar aqui ou usamos o `deleteItems` de forma criativa.
-
-      // Vamos usar o `addTrackToFolder` para reescrever? Não, isso adiciona.
-      // Vamos ter de criar uma lógica simples de update aqui.
-
       const updatedFolders = folders.map((f) => {
-        if (f.id === currentPath) {
-          return { ...f, tracks: newTracks };
-        }
+        if (f.id === currentPath) return { ...f, tracks: newTracks };
         return f;
       });
 
-      // Atualiza TODAS as pastas no Firestore (é seguro porque temos os dados todos)
-      // Usamos uma chamada direta ou expandimos a API.
-      // Para manter simples, vou usar uma função `saveFolders` que adiciono agora.
+      // API Call: Assume que existe uma forma de atualizar a estrutura de pastas
       await leaderboardApi.saveFolders(currentUser, updatedFolders);
     }
 
@@ -291,35 +331,46 @@ const MyDocumentsApp = ({ windowId }) => {
     if (selectedItems.size === 0) return;
     openWindow("CONFIRM_DIALOG", {
       title: "Confirm Delete",
-      message: `Delete ${selectedItems.size} items?`,
+      message: `Are you sure you want to delete ${selectedItems.size} items?`,
       icon: "warning",
       onConfirm: performBulkDelete,
-      width: 350,
-      height: 160,
     });
   };
 
+  // --- DRAG AND DROP (File Moving) ---
   const handleDragStart = (e, track) => {
     e.dataTransfer.setData("track", JSON.stringify(track));
-  };
-  const handleDropOnFolder = async (e, folder) => {
-    e.preventDefault();
-    const trackData = JSON.parse(e.dataTransfer.getData("track"));
-    await leaderboardApi.addTrackToFolder(currentUser, folder, trackData);
-    loadData();
+    // Visual feedback handled by browser automatically
   };
 
+  const handleDropOnFolder = async (e, folder) => {
+    e.preventDefault();
+    e.stopPropagation(); // Impede bubbling
+    try {
+      const trackData = JSON.parse(e.dataTransfer.getData("track"));
+      await leaderboardApi.addTrackToFolder(currentUser, folder, trackData);
+      loadData();
+    } catch (err) {
+      console.error("Invalid drop data");
+    }
+  };
+
+  // =========================================================
+  // 5. RENDERIZAÇÃO
+  // =========================================================
   return (
     <div
       className="flex h-full font-sans text-xs select-none bg-white relative"
+      // Eventos globais do container para permitir drag selection fluido
       onMouseUp={handleMouseUp}
       onMouseMove={handleMouseMove}
     >
+      {/* MENU DE CONTEXTO (Custom Right Click) */}
       {contextMenu.visible && (
         <div
           className="fixed z-[9999] bg-[#D4D0C8] border-2 border-white border-r-gray-600 border-b-gray-600 shadow-md py-1 min-w-[140px]"
           style={{ top: contextMenu.y, left: contextMenu.x }}
-          onClick={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()} // Previne fechar o menu ao clicar nele
         >
           {contextMenu.type === "BACKGROUND" ? (
             <>
@@ -358,7 +409,7 @@ const MyDocumentsApp = ({ windowId }) => {
         </div>
       )}
 
-      {/* SIDEBAR */}
+      {/* SIDEBAR (Windows XP Tasks Panel) */}
       <div className="w-48 bg-gradient-to-b from-[#7CA0DA] to-[#62799D] p-3 text-white hidden md:block overflow-y-auto z-20">
         <div className="mb-4">
           <h3 className="font-bold mb-2 cursor-default">
@@ -386,6 +437,7 @@ const MyDocumentsApp = ({ windowId }) => {
             </button>
           )}
         </div>
+
         <div className="mb-4">
           <h3 className="font-bold mb-2 cursor-default">Other Places</h3>
           <button
@@ -395,6 +447,7 @@ const MyDocumentsApp = ({ windowId }) => {
             <img src="/icons/MyComputer.ico" className="w-4 h-4" /> My Computer
           </button>
         </div>
+
         <div className="mt-auto pt-4">
           <h3 className="font-bold mb-2 cursor-default">Details</h3>
           {!spotifyToken ? (
@@ -418,7 +471,9 @@ const MyDocumentsApp = ({ windowId }) => {
         </div>
       </div>
 
+      {/* ÁREA PRINCIPAL */}
       <div className="flex-grow flex flex-col bg-white relative h-full">
+        {/* Address Bar */}
         <div className="p-1 border-b border-gray-300 bg-[#ECE9D8] flex gap-2 items-center shadow-sm relative z-20">
           <span className="text-gray-500 pl-1">Address:</span>
           <div className="bg-white border border-[#7F9DB9] px-2 py-0.5 w-full text-black shadow-inner truncate">
@@ -429,12 +484,14 @@ const MyDocumentsApp = ({ windowId }) => {
           </div>
         </div>
 
+        {/* Scroll Area / Drop Zone */}
         <div
           ref={containerRef}
           className="flex-grow p-4 overflow-auto bg-white relative"
           onMouseDown={handleMouseDown}
           onContextMenu={(e) => handleContextMenu(e, "BACKGROUND")}
         >
+          {/* Caixa de Seleção Visual */}
           {selectionBox && (
             <div
               className="absolute bg-[#316AC5] border border-[#000080] opacity-40 pointer-events-none z-50"
@@ -447,9 +504,12 @@ const MyDocumentsApp = ({ windowId }) => {
             />
           )}
 
+          {/* GRID DE ÍCONES */}
           <div className="grid grid-cols-4 md:grid-cols-5 gap-4 content-start">
+            {/* MODO: ROOT */}
             {currentPath === "ROOT" ? (
               <>
+                {/* Pastas */}
                 {folders.map((folder) => {
                   const isSelected = selectedItems.has(folder.id);
                   return (
@@ -466,7 +526,7 @@ const MyDocumentsApp = ({ windowId }) => {
                         handleContextMenu(e, "ITEM", folder.id)
                       }
                       onDrop={(e) => handleDropOnFolder(e, folder)}
-                      onDragOver={(e) => e.preventDefault()}
+                      onDragOver={(e) => e.preventDefault()} // Necessário para permitir Drop
                       className={`flex flex-col items-center group w-24 cursor-pointer p-1 border ${
                         isSelected
                           ? "bg-[#316AC5] border-[#000080]"
@@ -495,6 +555,8 @@ const MyDocumentsApp = ({ windowId }) => {
                     </div>
                   );
                 })}
+
+                {/* Músicas Soltas (Likes) */}
                 {likedTracks.map((track, idx) => {
                   const trackId = `track-${idx}`;
                   const isSelected = selectedItems.has(trackId);
@@ -543,7 +605,9 @@ const MyDocumentsApp = ({ windowId }) => {
                 })}
               </>
             ) : (
+              // MODO: DENTRO DE PASTA
               <>
+                {/* Botão "Up One Level" */}
                 <div
                   onDoubleClick={() => setCurrentPath("ROOT")}
                   className="flex flex-col items-center group w-20 cursor-pointer opacity-70 p-1"
@@ -554,6 +618,8 @@ const MyDocumentsApp = ({ windowId }) => {
                   />
                   <span className="text-center mt-1 text-[11px]">.. (Up)</span>
                 </div>
+
+                {/* Conteúdo da Pasta */}
                 {folders
                   .find((f) => f.id === currentPath)
                   ?.tracks.map((track, idx) => {

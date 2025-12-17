@@ -1,21 +1,34 @@
-/* Ficheiro: src/index.css */
-
-/* As 3 diretivas MÁGICAS do Tailwind */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Estilos base CORRIGIDOS */
-body,
-#root {
-  margin: 0;
-  padding: 0;
-  width: 100vw;
-  height: 100vh;
-  overflow: hidden;
-  font-family: "Tahoma", sans-serif;
+/* Estilos Globais para Scrollbars estilo Windows Clássico */
+::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
 }
 
-body {
-  background-color: #3a6ea5; /* Cor de fallback */
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-left: 1px solid #d4d4d4;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border: 2px solid #f1f1f1;
+  border-radius: 0;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+/* Garante que o html/body ocupam tudo */
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
 }

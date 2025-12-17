@@ -3,21 +3,36 @@ import { useWindowManager } from "../contexts/WindowManagerContext";
 import { useAuth } from "../contexts/AuthContext";
 import { leaderboardApi } from "../services/leaderboardApi";
 
+// Configuração de API: Usa a variável de ambiente do Vite ou fallback para localhost
 const PROXY_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";
 
+/**
+ * Aplicação "Daily Drop" (Desafio Diário).
+ * * Funcionalidades Chave:
+ * 1. Persistência Local: O estado do jogo é salvo no localStorage para sobreviver a F5.
+ * 2. Validação Insensível: "The Weeknd" == "the weeknd ".
+ * 3. Revelação Progressiva: Pistas são desbloqueadas conforme o utilizador erra.
+ */
 const DailyDropApp = ({ windowId }) => {
   const { closeWindow } = useWindowManager();
   const { currentUser } = useAuth();
 
-  const [dailyData, setDailyData] = useState(null);
+  // --- STATE MANAGEMENT ---
+  const [dailyData, setDailyData] = useState(null); // Dados do desafio (API)
   const [loading, setLoading] = useState(true);
+
+  // Estado do Jogo (Game Loop)
   const [guess, setGuess] = useState("");
-  const [attempts, setAttempts] = useState([]);
-  const [gameStatus, setGameStatus] = useState("PLAYING");
-  const [nextHintIndex, setNextHintIndex] = useState(0);
+  const [attempts, setAttempts] = useState([]); // Histórico de tentativas
+  const [gameStatus, setGameStatus] = useState("PLAYING"); // "PLAYING" | "WON" | "LOST"
+  const [nextHintIndex, setNextHintIndex] = useState(0); // Controla quantas pistas mostramos
+
+  // Estado Multimédia
   const [videoId, setVideoId] = useState(null);
 
-  // 1. Carregar Dados
+  // =========================================================
+  // 1. DATA FETCHING & STATE RESTORATION
+  // =========================================================
   useEffect(() => {
     const fetchDaily = async () => {
       try {
@@ -26,25 +41,33 @@ const DailyDropApp = ({ windowId }) => {
         const data = await res.json();
         setDailyData(data);
 
+        // Lógica de Restauro: Verifica se o utilizador já jogou hoje
         const savedState = JSON.parse(localStorage.getItem("daily_drop_state"));
+
+        // Se o save local corresponder ao ID do desafio de hoje (server), restaura o progresso.
         if (savedState && savedState.dayId === data.dayId) {
           setAttempts(savedState.attempts);
           setGameStatus(savedState.gameStatus);
+          // Calcula quantas pistas devem estar visíveis baseadas nos erros
           setNextHintIndex(savedState.attempts.length);
         } else {
+          // Se for um dia novo, limpa o lixo do dia anterior
           localStorage.removeItem("daily_drop_state");
         }
       } catch (e) {
         setDailyData({ error: true });
-        setGameStatus("LOST");
+        setGameStatus("LOST"); // Bloqueia o jogo em caso de erro crítico
       } finally {
         setLoading(false);
       }
     };
     fetchDaily();
-  }, []);
+  }, []); // Empty dependency array = Component Mount
 
-  // 2. Guardar Estado
+  // =========================================================
+  // 2. PERSISTENCE ENGINE (Auto-Save)
+  // =========================================================
+  // Salva o estado sempre que o jogador faz um movimento relevante.
   useEffect(() => {
     if (dailyData && !dailyData.error) {
       localStorage.setItem(
@@ -58,7 +81,11 @@ const DailyDropApp = ({ windowId }) => {
     }
   }, [attempts, gameStatus, dailyData]);
 
-  // 3. Buscar Vídeo (Apenas no fim)
+  // =========================================================
+  // 3. REWARD SYSTEM (YouTube Integration)
+  // =========================================================
+  // Busca o videoclip apenas quando o jogo termina, para não gastar quota da API antes do tempo
+  // e para servir como recompensa visual.
   useEffect(() => {
     if ((gameStatus === "WON" || gameStatus === "LOST") && dailyData?.name) {
       fetch(
@@ -70,50 +97,60 @@ const DailyDropApp = ({ windowId }) => {
         .then((data) => {
           if (data.videoId) setVideoId(data.videoId);
         })
-        .catch((err) => console.error("Video fetch error:", err));
+        .catch((err) => console.warn("Video fetch skipped/failed:", err));
     }
   }, [gameStatus, dailyData]);
 
+  // =========================================================
+  // 4. GAME LOGIC (Validation)
+  // =========================================================
   const handleGuess = (e) => {
     e.preventDefault();
+    // Guard Clauses: Previne submissões vazias ou se o jogo já acabou
     if (!guess.trim() || gameStatus !== "PLAYING" || dailyData.error) return;
 
     const newAttempts = [...attempts, guess];
     setAttempts(newAttempts);
 
+    // Normalização: Remove espaços e converte para minúsculas para comparação justa
     const cleanGuess = guess.toLowerCase().trim();
     const cleanName = dailyData.name.toLowerCase().trim();
 
     if (cleanGuess === cleanName) {
+      // WIN CONDITION
       setGameStatus("WON");
       if (currentUser) leaderboardApi.recordDailyDropWin(currentUser);
     } else {
+      // LOSE/CONTINUE CONDITION
       if (newAttempts.length >= 4) {
-        setGameStatus("LOST");
+        setGameStatus("LOST"); // Max tentativas atingido
       } else {
-        setNextHintIndex((prev) => prev + 1);
+        setNextHintIndex((prev) => prev + 1); // Desbloqueia próxima pista
       }
     }
-    setGuess("");
+    setGuess(""); // Limpa input para UX fluida
   };
 
+  // --- RENDER: LOADING STATE ---
   if (loading)
     return (
       <div className="h-full flex items-center justify-center bg-[#ECE9D8]">
         <div className="flex flex-col items-center gap-2">
           <div className="w-6 h-6 border-2 border-[#003399] border-t-transparent rounded-full animate-spin"></div>
           <span className="text-xs text-gray-600">
-            Loading Daily Challenge...
+            A carregar Desafio Diário...
           </span>
         </div>
       </div>
     );
 
+  // --- RENDER: MAIN APP ---
   return (
     <div className="h-full flex flex-col bg-[#ECE9D8] font-sans select-none text-sm">
-      {/* --- HEADER --- */}
+      {/* HEADER: Identidade Visual do Jogo */}
       <div className="bg-white border-b border-[#D6D3CE] p-3 flex items-center gap-3 flex-shrink-0">
         <div className="w-10 h-10 border border-[#D6D3CE] p-[2px] shadow-sm bg-white">
+          {/* Avatar do Artista (Fallback seguro) */}
           <img
             src={dailyData?.image || "/icons/search.png"}
             className="w-full h-full object-cover"
@@ -135,21 +172,24 @@ const DailyDropApp = ({ windowId }) => {
         </div>
       </div>
 
-      {/* --- MAIN CONTENT --- */}
+      {/* SCROLLABLE AREA: Conteúdo do Jogo */}
       <div className="flex-grow p-4 overflow-y-auto">
         <div className="flex flex-col gap-3">
-          {/* Section Title */}
+          {/* Título de Secção */}
           <div className="text-[#003399] font-bold text-xs border-b border-[#A0A0A0] mb-1 pb-1">
             Clues
           </div>
 
-          {/* Clues List */}
+          {/* LISTA DE PISTAS (Renderização Condicional baseada no progresso) */}
           <div className="flex flex-col gap-2">
             {dailyData?.hints?.map((hint, idx) => {
+              // A pista é visível se o índice for menor que as tentativas OU se o jogo acabou
               const isVisible =
                 idx <= nextHintIndex || gameStatus !== "PLAYING";
+
               return (
                 <div key={idx} className="flex gap-2">
+                  {/* Número da Pista */}
                   <div
                     className={`w-6 h-6 flex-shrink-0 flex items-center justify-center font-bold text-xs rounded-sm shadow-sm border ${
                       isVisible
@@ -159,6 +199,7 @@ const DailyDropApp = ({ windowId }) => {
                   >
                     {idx + 1}
                   </div>
+                  {/* Texto da Pista (Blur/Locked se não visível) */}
                   <div
                     className={`flex-grow p-2 text-xs border rounded-sm shadow-sm leading-relaxed ${
                       isVisible
@@ -173,7 +214,7 @@ const DailyDropApp = ({ windowId }) => {
             })}
           </div>
 
-          {/* --- RESULTADO FINAL --- */}
+          {/* ÁREA DE RESULTADO (Vitória/Derrota) */}
           {gameStatus !== "PLAYING" && (
             <div
               className={`mt-4 border-2 rounded p-3 text-center shadow-md animate-in fade-in zoom-in duration-300 ${
@@ -198,7 +239,7 @@ const DailyDropApp = ({ windowId }) => {
                 </p>
               )}
 
-              {/* Video Container */}
+              {/* VIDEO EMBED: Recompensa visual */}
               <div className="w-full bg-black border-2 border-white shadow-lg mx-auto max-w-[400px]">
                 {videoId ? (
                   <div className="relative w-full aspect-video">
@@ -234,7 +275,7 @@ const DailyDropApp = ({ windowId }) => {
             </div>
           )}
 
-          {/* --- ATTEMPTS HISTORY --- */}
+          {/* HISTÓRICO DE ERROS */}
           {gameStatus === "PLAYING" && !dailyData.error && (
             <div className="mt-2">
               <div className="text-[10px] text-[#003399] font-bold mb-1 uppercase tracking-wider">
@@ -261,7 +302,7 @@ const DailyDropApp = ({ windowId }) => {
         </div>
       </div>
 
-      {/* --- INPUT FOOTER --- */}
+      {/* FOOTER: Input Area */}
       {gameStatus === "PLAYING" && !dailyData.error && (
         <div className="bg-[#ECE9D8] border-t border-[#D6D3CE] p-3 flex-shrink-0">
           <form onSubmit={handleGuess} className="flex gap-2">

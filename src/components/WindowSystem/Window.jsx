@@ -2,7 +2,14 @@ import React, { useRef, useEffect, Suspense } from "react";
 import { useWindowManager } from "../../contexts/WindowManagerContext";
 import WindowControls from "./WindowControls";
 
-// --- COMPONENTE DE SEGURANÇA (ERROR BOUNDARY) ---
+// =========================================================
+// ERROR BOUNDARY (Isolamento de Falhas)
+// =========================================================
+/**
+ * Componente de Classe (Requisito do React para Error Boundaries).
+ * Se um componente filho lançar um erro, este componente captura-o e mostra
+ * uma UI de fallback em vez de deixar a aplicação toda em branco (White Screen of Death).
+ */
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -19,6 +26,7 @@ class ErrorBoundary extends React.Component {
 
   render() {
     if (this.state.hasError) {
+      // UI de Erro estilo "Doctor Watson" do Windows XP
       return (
         <div className="h-full flex flex-col items-center justify-center bg-[#ECE9D8] text-red-600 p-4 text-center font-sans select-none">
           <img
@@ -32,6 +40,7 @@ class ErrorBoundary extends React.Component {
             The application has encountered a problem and needs to close.
           </p>
           <button
+            // Tenta reiniciar o estado local do erro
             onClick={() => this.setState({ hasError: false })}
             className="mt-4 px-3 py-1 bg-[#F0F0F0] border border-[#003C74] rounded-[3px] text-xs hover:bg-white shadow-sm active:translate-y-px"
           >
@@ -45,18 +54,20 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-// --- COMPONENTE JANELA ---
+// =========================================================
+// COMPONENTE JANELA (Window Container)
+// =========================================================
 const Window = ({
   id,
   title,
   icon,
-  content: ContentComponent,
+  content: ContentComponent, // Componente dinâmico da App
   zIndex,
   position,
   size,
   isMinimized,
   isMaximized,
-  props,
+  props, // Props extra passadas para a App
 }) => {
   const {
     closeWindow,
@@ -66,20 +77,28 @@ const Window = ({
     updateWindowPosition,
   } = useWindowManager();
 
+  // Refs para lógica de Drag (evita re-renders desnecessários)
   const isDragging = useRef(false);
   const dragStart = useRef({ x: 0, y: 0 });
   const windowStart = useRef({ x: 0, y: 0 });
 
+  // Se minimizada, não renderiza nada (liberta GPU, mas mantém estado na memória do Contexto)
   if (isMinimized) return null;
 
+  // --- DRAG LOGIC ---
   const handleMouseDown = (e) => {
+    // 1. Traz para a frente (Focus)
     if (e.button !== 0) return;
     focusWindow(id);
+
+    // 2. Inicia Arrasto (apenas se não estiver maximizada)
     if (isMaximized) return;
+
     e.preventDefault();
     isDragging.current = true;
     dragStart.current = { x: e.clientX, y: e.clientY };
     windowStart.current = { ...position };
+
     document.addEventListener("mousemove", handleMouseMove);
     document.addEventListener("mouseup", handleMouseUp);
   };
@@ -88,11 +107,12 @@ const Window = ({
     if (!isDragging.current) return;
     const dx = e.clientX - dragStart.current.x;
     const dy = e.clientY - dragStart.current.y;
-    const newPos = {
+
+    // Atualiza posição no Contexto (Global State)
+    updateWindowPosition(id, {
       x: windowStart.current.x + dx,
       y: windowStart.current.y + dy,
-    };
-    updateWindowPosition(id, newPos);
+    });
   };
 
   const handleMouseUp = () => {
@@ -108,10 +128,11 @@ const Window = ({
     };
   }, []);
 
+  // --- STYLING DINÂMICO ---
   const currentStyle = isMaximized
     ? {
         width: "100%",
-        height: "calc(100% - 30px)",
+        height: "calc(100% - 30px)", // Desconta a Taskbar
         top: 0,
         left: 0,
         borderRadius: "0",
@@ -122,7 +143,7 @@ const Window = ({
         height: size.height,
         top: position.y,
         left: position.x,
-        borderRadius: "8px 8px 0 0",
+        borderRadius: "8px 8px 0 0", // Cantos arredondados apenas no topo (XP Style)
         zIndex,
       };
 
@@ -131,14 +152,16 @@ const Window = ({
       className="absolute flex flex-col shadow-xp-window font-sans"
       style={{
         ...currentStyle,
-        backgroundColor: "#0055E5",
+        backgroundColor: "#0055E5", // VerseVault Blue
         padding: "3px",
         paddingBottom: "0px",
       }}
+      // Qualquer clique na janela foca-a
       onMouseDown={() => focusWindow(id)}
     >
+      {/* TITLE BAR (Arrastável) */}
       <div
-        className="h-[30px] flex items-center justify-between px-1 select-none"
+        className="h-[30px] flex items-center justify-between px-1 select-none cursor-default"
         onMouseDown={handleMouseDown}
         onDoubleClick={() => toggleMaximizeWindow(id)}
         style={{
@@ -160,6 +183,8 @@ const Window = ({
             {title}
           </span>
         </div>
+
+        {/* Controles (Min/Max/Close) - Stop Propagation para não arrastar */}
         <div onMouseDown={(e) => e.stopPropagation()}>
           <WindowControls
             onMinimize={() => minimizeWindow(id)}
@@ -169,10 +194,11 @@ const Window = ({
         </div>
       </div>
 
+      {/* CONTENT AREA */}
       <div className="flex-grow bg-white relative overflow-hidden flex flex-col">
         <div className="flex-grow overflow-auto p-0">
-          {/* PROTEÇÃO: ErrorBoundary + Suspense */}
           <ErrorBoundary>
+            {/* Suspense: Se a app for carregada via lazy load, mostra spinner */}
             <Suspense
               fallback={
                 <div className="h-full flex items-center justify-center bg-[#ECE9D8]">

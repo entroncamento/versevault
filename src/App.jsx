@@ -1,26 +1,38 @@
 // Ficheiro: src/App.jsx
 import React, { useState, useEffect } from "react";
+
+// Context Providers
 import { WindowManagerProvider } from "./contexts/WindowManagerContext.jsx";
 import { AuthProvider, useAuth } from "./contexts/AuthContext.jsx";
+
+// Core UI Components
 import Taskbar from "./components/Taskbar/Taskbar.jsx";
 import Desktop from "./components/Desktop/Desktop.jsx";
+
+// Startup Sequence Components
 import BootScreen from "./components/Login/BootScreen.jsx";
 import LoginScreen from "./components/Login/LoginScreen.jsx";
 import CreateProfileScreen from "./components/Login/CreateProfileScreen.jsx";
 
-// Apps
-import "./apps/QuizApp.jsx";
-import "./apps/MyComputer.jsx";
-
+/**
+ * Componente que gere a Máquina de Estados do Sistema Operativo.
+ * Sequência de Boot:
+ * 1. BootScreen (Simulação BIOS/Loading)
+ * 2. LoginScreen (Autenticação)
+ * 3. CreateProfileScreen (Apenas se for novo utilizador sem nome/foto)
+ * 4. Desktop (Ambiente de Trabalho)
+ */
 const OSContent = () => {
-  const [bootCompleted, setBootCompleted] = useState(false);
   const { currentUser, logout } = useAuth();
 
-  // Inicia o estado baseado se o utilizador já tem os dados necessários.
-  // Se não tiver user, é false.
+  // State Machine
+  const [bootCompleted, setBootCompleted] = useState(false);
   const [setupComplete, setSetupComplete] = useState(false);
 
+  // Monitoriza o perfil do utilizador para decidir se mostra o Wizard de Setup
   useEffect(() => {
+    // Se o utilizador tem Nome E Foto, consideramos o setup completo.
+    // Nota: O Login Google geralmente preenche isto automaticamente.
     if (currentUser?.displayName && currentUser?.photoURL) {
       setSetupComplete(true);
     } else {
@@ -28,42 +40,52 @@ const OSContent = () => {
     }
   }, [currentUser]);
 
-  // 1. Boot Screen
+  // --- ESTADO 1: BOOT SEQUENCER ---
   if (!bootCompleted) {
     return <BootScreen onComplete={() => setBootCompleted(true)} />;
   }
 
-  // 2. Login Screen (Se não houver user autenticado)
+  // --- ESTADO 2: AUTENTICAÇÃO ---
   if (!currentUser) {
     return <LoginScreen />;
   }
 
-  // 3. Create Profile Screen (Logado, mas sem perfil completo)
+  // --- ESTADO 3: FIRST RUN WIZARD (Setup de Perfil) ---
   if (!setupComplete) {
     return (
       <CreateProfileScreen
         user={currentUser}
         onComplete={() => {
-          // Força a atualização visual caso o Firebase demore a propagar
+          // Otimisticamente define como completo para transição imediata
           setSetupComplete(true);
-          // Aqui podes adicionar um reload forçado se necessário: window.location.reload();
         }}
-        onCancel={logout}
+        onCancel={logout} // Se cancelar, volta para o Login
       />
     );
   }
 
-  // 4. Desktop (OS Completo)
+  // --- ESTADO 4: AMBIENTE DE TRABALHO (DESKTOP) ---
+  // Envolvemos o Desktop no WindowManagerProvider apenas aqui,
+  // para garantir que as janelas só existem quando há um utilizador logado.
   return (
     <WindowManagerProvider>
-      <Desktop />
-      <Taskbar />
+      <div className="h-screen w-screen overflow-hidden flex flex-col relative font-sans select-none cursor-default">
+        {/* Camada de Fundo e Ícones */}
+        <div className="flex-grow relative z-0">
+          <Desktop />
+        </div>
+
+        {/* Barra de Tarefas (Z-Index alto gerido internamente) */}
+        <Taskbar />
+      </div>
     </WindowManagerProvider>
   );
 };
 
+// Componente Raiz
 const App = () => {
   return (
+    // O AuthProvider envolve tudo para manter a persistência da sessão
     <AuthProvider>
       <OSContent />
     </AuthProvider>

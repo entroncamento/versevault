@@ -3,6 +3,11 @@ import { updateProfile } from "firebase/auth";
 import { useAuth } from "../contexts/AuthContext";
 import { useWindowManager } from "../contexts/WindowManagerContext";
 
+// =========================================================
+// ASSETS & CONSTANTES
+// =========================================================
+// Nota: Em produção, estes ícones deveriam estar na pasta /public
+// para evitar dependência de servidores externos (Win98Icons).
 const XP_ICONS = [
   "https://win98icons.alexmeub.com/icons/png/tree-0.png",
   "https://win98icons.alexmeub.com/icons/png/camera-0.png",
@@ -18,33 +23,47 @@ const XP_ICONS = [
   "https://win98icons.alexmeub.com/icons/png/loudspeaker_muted-0.png",
 ];
 
+/**
+ * Aplicação de Contas de Utilizador (Painel de Controlo).
+ * Permite alterar o Display Name e o Avatar do utilizador Firebase.
+ */
 const UserAccountsApp = ({ windowId }) => {
   const { currentUser } = useAuth();
   const { closeWindow } = useWindowManager();
 
+  // --- STATE MANAGEMENT ---
+  // Inicializa com dados existentes ou fallbacks seguros
   const [name, setName] = useState(currentUser?.displayName || "");
   const [photoUrl, setPhotoUrl] = useState(
     currentUser?.photoURL || "/icons/Minesweeper.ico"
   );
+
   const [loading, setLoading] = useState(false);
   const [showIconPicker, setShowIconPicker] = useState(false);
 
+  // =========================================================
+  // LOGIC: PROFILE UPDATE
+  // =========================================================
   const handleSave = async (e) => {
     e.preventDefault();
     if (!name.trim()) return;
 
     setLoading(true);
     try {
+      // Firebase Auth: Atualiza o perfil no servidor
       await updateProfile(currentUser, {
         displayName: name,
         photoURL: photoUrl,
       });
 
+      // SUCESSO: Fecha a janela imediatamente.
+      // Optimization: Não fazemos setLoading(false) aqui porque o componente
+      // vai ser desmontado (unmounted) pelo closeWindow.
       closeWindow(windowId);
     } catch (error) {
       console.error("Erro ao atualizar perfil:", error);
-      alert("Failed to update profile.");
-    } finally {
+      alert("Failed to update profile. Please try again.");
+      // ERRO: Aqui sim, paramos o loading para o utilizador poder tentar de novo
       setLoading(false);
     }
   };
@@ -55,15 +74,21 @@ const UserAccountsApp = ({ windowId }) => {
 
   return (
     <div className="h-full w-full bg-white font-sans flex flex-col overflow-hidden relative">
+      {/* =========================================================
+          MODAL: ICON PICKER (Sobreposição)
+         ========================================================= */}
       {showIconPicker && (
         <div
+          // Backdrop: Clicar fora fecha o modal
           className="absolute inset-0 z-50 flex items-center justify-center bg-black/20"
           onClick={() => setShowIconPicker(false)}
         >
           <div
+            // Modal Content: Clicar aqui NÃO deve fechar o modal
             className="bg-[#ECE9D8] border-[3px] border-[#0055E5] rounded-t-lg shadow-xl w-[320px] p-[2px]"
-            onClick={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()} // Impede "Event Bubbling" para o backdrop
           >
+            {/* Header do Modal */}
             <div className="bg-gradient-to-r from-[#0058EE] to-[#3593FF] text-white font-bold px-2 py-1 flex justify-between items-center select-none shadow-sm mb-1 rounded-sm">
               <span className="drop-shadow-sm text-sm">Change Icon</span>
               <button
@@ -73,9 +98,12 @@ const UserAccountsApp = ({ windowId }) => {
                 X
               </button>
             </div>
+
             <div className="text-xs text-gray-600 px-2 mb-2">
               Select an icon:
             </div>
+
+            {/* Grid de Ícones */}
             <div className="p-2 bg-white m-[2px] border-2 border-inset border-[#7F9DB9] h-[220px] overflow-y-auto grid grid-cols-4 gap-2 content-start">
               {XP_ICONS.map((icon, index) => (
                 <button
@@ -94,6 +122,7 @@ const UserAccountsApp = ({ windowId }) => {
                 </button>
               ))}
             </div>
+
             <div className="flex justify-end gap-2 p-2 bg-[#ECE9D8] border-t border-white">
               <button
                 onClick={() => setShowIconPicker(false)}
@@ -106,6 +135,9 @@ const UserAccountsApp = ({ windowId }) => {
         </div>
       )}
 
+      {/* =========================================================
+          HEADER DA JANELA (Estilo XP Control Panel)
+         ========================================================= */}
       <div className="h-[50px] bg-[#003399] flex items-center px-4 justify-between relative overflow-hidden border-b-[2px] border-orange-400 flex-shrink-0">
         <div className="absolute top-0 left-0 w-full h-1/2 bg-white/10 pointer-events-none" />
         <div className="flex items-center gap-4 z-10">
@@ -126,9 +158,11 @@ const UserAccountsApp = ({ windowId }) => {
         </span>
       </div>
 
-      {/* --- CORPO --- */}
+      {/* =========================================================
+          CORPO PRINCIPAL
+         ========================================================= */}
       <div className="flex flex-grow overflow-auto">
-        {/* Sidebar Azul */}
+        {/* Sidebar Azul (Info Panel) */}
         <div className="w-[200px] bg-[#6477CB] relative hidden md:block border-r border-[#003399] flex-shrink-0">
           <div className="absolute bottom-0 left-0 w-full h-32 bg-gradient-to-t from-[#003399]/50 to-transparent" />
           <div className="p-4 text-white text-xs">
@@ -142,14 +176,14 @@ const UserAccountsApp = ({ windowId }) => {
           </div>
         </div>
 
-        {/* Área de Edição */}
+        {/* Área de Formulário */}
         <div className="flex-grow p-8 flex flex-col">
           <h1 className="text-[#003399] text-2xl font-light mb-6">
             Change your profile
           </h1>
 
           <form onSubmit={handleSave} className="flex flex-col gap-6 max-w-md">
-            {/* Nome */}
+            {/* Input Nome */}
             <div className="flex flex-col gap-2">
               <label className="text-gray-800 text-xs font-bold">
                 Type a new name for your account:
@@ -159,6 +193,7 @@ const UserAccountsApp = ({ windowId }) => {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 className="w-full p-1 border-2 border-[#7F9DB9] rounded-[3px] outline-none focus:border-[#3C7FB1] shadow-inner text-sm px-2"
+                autoFocus
               />
             </div>
 
@@ -166,7 +201,7 @@ const UserAccountsApp = ({ windowId }) => {
               This name will appear on the Welcome screen and on the Start menu.
             </p>
 
-            {/* Foto */}
+            {/* Seleção de Foto */}
             <div className="flex items-start gap-4 mt-2">
               <div className="flex flex-col items-center gap-2">
                 <div className="w-16 h-16 bg-white border-2 border-[#7F9DB9] rounded-[3px] flex-shrink-0 overflow-hidden shadow-sm flex items-center justify-center p-1">
@@ -175,7 +210,7 @@ const UserAccountsApp = ({ windowId }) => {
                     alt="Profile"
                     className="w-full h-full object-contain"
                     onError={(e) => {
-                      e.target.src = "/icons/Minesweeper.ico";
+                      e.target.src = "/icons/Minesweeper.ico"; // Fallback seguro
                     }}
                   />
                 </div>
@@ -197,8 +232,9 @@ const UserAccountsApp = ({ windowId }) => {
               </div>
             </div>
 
-            {/* Botões de Ação */}
             <div className="w-full h-[2px] bg-gradient-to-r from-transparent via-[#D6D3CE] to-transparent my-2" />
+
+            {/* Footer de Ações */}
             <div className="flex gap-2 justify-end">
               <button
                 type="button"
